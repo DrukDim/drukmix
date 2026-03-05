@@ -1,0 +1,233 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ENV_FILE="/etc/drukmix.env"
+if [[ -f "$ENV_FILE" ]]; then
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+fi
+
+# -------------------- Paths (override via /etc/drukmix.env) --------------------
+DRUKMIX_REPO="${DRUKMIX_REPO:-/home/dan/drukmix_repo}"
+
+# live/runtime
+DRUKMIX_AGENT="${DRUKMIX_AGENT:-/home/dan/drukmix_agent.py}"
+DRUKMIX_CFG="${DRUKMIX_CFG:-/home/dan/printer_data/config/drukmix.cfg}"
+DRUKMIX_MACROS="${DRUKMIX_MACROS:-/home/dan/printer_data/config/drukmix_macros.cfg}"
+DRUKMIX_UNIT="${DRUKMIX_UNIT:-/etc/systemd/system/drukmix.service}"
+DRUKMIX_SERVICE="${DRUKMIX_SERVICE:-drukmix.service}"
+DRUKMIX_LOG="${DRUKMIX_LOG:-/home/dan/printer_data/logs/drukmix.log}"
+
+# repo/source-of-truth
+REPO_AGENT="$DRUKMIX_REPO/drukmix_agent.py"
+REPO_CFG="$DRUKMIX_REPO/config/drukmix.cfg"
+REPO_MACROS="$DRUKMIX_REPO/config/drukmix_macros.cfg"
+REPO_UNIT="$DRUKMIX_REPO/systemd/drukmix.service"
+REPO_HELPER="$DRUKMIX_REPO/tools/drukmix"
+
+die(){ echo "ERROR: $*" >&2; exit 2; }
+
+need_repo(){
+  [[ -d "$DRUKMIX_REPO/.git" ]] || die "repo not found: $DRUKMIX_REPO (set DRUKMIX_REPO in $ENV_FILE)"
+}
+
+ensure_repo_dirs(){
+  mkdir -p "$DRUKMIX_REPO/config" "$DRUKMIX_REPO/systemd" "$DRUKMIX_REPO/tools"
+}
+
+as_root(){
+  sudo bash -lc "$*"
+}
+
+cmd_help(){
+  cat <<'TXT'
+drukmix — helper (repo <-> live) + git workflow
+
+Core ideas:
+  - repo is source of truth: ~/drukmix_repo
+  - live files are runtime: /home/dan/... + /etc/systemd/...
+
+Commands:
+  drukmix help
+  drukmix status                 show paths + systemd status
+  drukmix diff                   diff live vs repo (core files only)
+
+  drukmix capture                copy LIVE -> REPO (no git)
+  drukmix publish "msg"          capture + git add/commit/push
+
+  drukmix fetch                  git pull --rebase in repo
+  drukmix apply                  copy REPO -> LIVE + daemon-reload + restart agent
+  drukmix update                 fetch + apply + klipper-restart
+
+  drukmix restart                restart drukmix.service
+  drukmix klipper-restart        Klipper RESTART via Moonraker
+  drukmix logs                   tail agent log
+  drukmix journal                last 150 lines of journal
+
+  drukmix install-self           install this helper to /usr/local/bin/drukmix
+
+Notes:
+  - Helper does NOT touch firmware/other repo folders. Only core files + itself.
+TXT
+}
+
+cmd_status(){
+  need_repo
+  echo "Repo:           $DRUKMIX_REPO"
+  echo "Repo agent:     $REPO_AGENT"
+  echo "Repo cfg:       $REPO_CFG"
+  echo "Repo macros:    $REPO_MACROS"
+  echo "Repo unit:      $REPO_UNIT"
+  echo "Repo helper:    $REPO_HELPER"
+  echo
+  echo "Live agent:     $DRUKMIX_AGENT"
+  echo "Live cfg:       $DRUKMIX_CFG"
+  echo "Live macros:    $DRUKMIX_MACROS"
+  echo "Live unit:      $DRUKMIX_UNIT"
+  echo "Service:        $DRUKMIX_SERVICE"
+  echo
+  systemctl status "$DRUKMIX_SERVICE" --no-pager || true
+}
+
+cmd_diff(){
+  need_repo
+  echo "=== agent diff ==="
+  diff -u "$DRUKMIX_AGENT" "$REPO_AGENT" || true
+  echo
+  echo "=== cfg diff ==="
+  diff -u "$DRUKMIX_CFG" "$REPO_CFG" || true
+  echo
+  echo "=== macros diff ==="
+  diff -u "$DRUKMIX_MACROS" "$REPO_MACROS" || true
+  echo
+  echo "=== unit diff ==="
+  sudo diff -u "$DRUKMIX_UNIT" "$REPO_UNIT" || true
+  echo
+  echo "=== helper diff (system vs repo) ==="
+  if [[ -f /usr/local/bin/drukmix ]]; then
+    sudo diff -u /usr/local/bin/drukmix "$REPO_HELPER" || true
+  else
+    echo "(system helper not installed)"
+  fi
+}
+
+cmd_capture(){
+  need_repo
+  ensure_repo_dirs
+  echo "Capture LIVE -> REPO"
+  [[ -f "$DRUKMIX_AGENT" ]] || die "missing live agent: $DRUKMIX_AGENT"
+  [[ -f "$DRUKMIX_CFG" ]] || die "missing live cfg: $DRUKMIX_CFG"
+  [[ -f "$DRUKMIX_MACROS" ]] || die "missing live macros: $DRUKMIX_MACROS"
+  [[ -f "$DRUKMIX_UNIT" ]] || die "missing live unit: $DRUKMIX_UNIT"
+
+  cp -f "$DRUKMIX_AGENT" "$REPO_AGENT"
+  chmod +x "$REPO_AGENT" || true
+  cp -f "$DRUKMIX_CFG" "$REPO_CFG"
+  cp -f "$DRUKMIX_MACROS" "$REPO_MACROS"
+  sudo cp -f "$DRUKMIX_UNIT" "$REPO_UNIT"
+
+  # also capture helper itself if installed in system (optional)
+  if [[ -f /usr/local/bin/drukmix ]]; then
+    sudo cp -f /usr/local/bin/drukmix "$REPO_HELPER" || true
+  fi
+
+  echo "OK: captured to repo. Review with: cd $DRUKMIX_REPO && git status"
+}
+
+cmd_publish(){
+  need_repo
+  local msg="${1:-}"
+  [[ -n "$msg" ]] || die "usage: drukmix publish \"commit message\""
+
+  cmd_capture
+  git -C "$DRUKMIX_REPO" add -A
+  git -C "$DRUKMIX_REPO" status
+  git -C "$DRUKMIX_REPO" commit -m "$msg"
+  git -C "$DRUKMIX_REPO" push origin main
+  echo "OK: published to GitHub"
+}
+
+cmd_fetch(){
+  need_repo
+  git -C "$DRUKMIX_REPO" pull --rebase
+  echo "OK: fetched latest repo"
+}
+
+cmd_apply(){
+  need_repo
+  echo "Apply REPO -> LIVE"
+
+  [[ -f "$REPO_AGENT" ]] || die "missing repo agent: $REPO_AGENT"
+  [[ -f "$REPO_CFG" ]] || die "missing repo cfg: $REPO_CFG"
+  [[ -f "$REPO_MACROS" ]] || die "missing repo macros: $REPO_MACROS"
+  [[ -f "$REPO_UNIT" ]] || die "missing repo unit: $REPO_UNIT"
+
+  cp -f "$REPO_AGENT" "$DRUKMIX_AGENT"
+  chmod +x "$DRUKMIX_AGENT" || true
+  cp -f "$REPO_CFG" "$DRUKMIX_CFG"
+  cp -f "$REPO_MACROS" "$DRUKMIX_MACROS"
+  sudo cp -f "$REPO_UNIT" "$DRUKMIX_UNIT"
+
+  sudo systemctl daemon-reload
+  sudo systemctl restart "$DRUKMIX_SERVICE"
+
+  echo "OK: applied. If you changed macros/cfg: run 'drukmix klipper-restart' (or use 'drukmix update')."
+}
+
+cmd_update(){
+  cmd_fetch
+  cmd_apply
+  cmd_klipper_restart
+}
+
+cmd_restart(){
+  sudo systemctl restart "$DRUKMIX_SERVICE"
+  systemctl status "$DRUKMIX_SERVICE" --no-pager || true
+}
+
+cmd_klipper_restart(){
+  if command -v curl >/dev/null 2>&1; then
+    curl -s localhost:7125/printer/restart >/dev/null || true
+    echo "Requested Klipper RESTART via Moonraker (localhost:7125)."
+  else
+    die "curl not found"
+  fi
+}
+
+cmd_logs(){
+  tail -n 160 -f "$DRUKMIX_LOG"
+}
+
+cmd_journal(){
+  sudo journalctl -u "$DRUKMIX_SERVICE" -n 150 --no-pager
+}
+
+cmd_install_self(){
+  need_repo
+  [[ -f "$REPO_HELPER" ]] || die "missing repo helper: $REPO_HELPER"
+  sudo install -m 0755 "$REPO_HELPER" /usr/local/bin/drukmix
+  echo "OK: installed helper to /usr/local/bin/drukmix"
+}
+
+main(){
+  local cmd="${1:-help}"
+  shift || true
+  case "$cmd" in
+    help|-h|--help) cmd_help ;;
+    status) cmd_status ;;
+    diff) cmd_diff ;;
+    capture) cmd_capture ;;
+    publish) cmd_publish "${1:-}" ;;
+    fetch) cmd_fetch ;;
+    apply) cmd_apply ;;
+    update) cmd_update ;;
+    restart) cmd_restart ;;
+    klipper-restart) cmd_klipper_restart ;;
+    logs) cmd_logs ;;
+    journal) cmd_journal ;;
+    install-self) cmd_install_self ;;
+    *) die "Unknown command: $cmd (try: drukmix help)" ;;
+  esac
+}
+
+main "$@"
