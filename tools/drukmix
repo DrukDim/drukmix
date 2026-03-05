@@ -149,6 +149,15 @@ cmd_publish(){
 
 cmd_fetch(){
   need_repo
+
+  # Guard: if a rebase/merge is in progress, refuse to pull
+  if [[ -d "$DRUKMIX_REPO/.git/rebase-apply" || -d "$DRUKMIX_REPO/.git/rebase-merge" ]]; then
+    die "git rebase in progress in repo. Run: cd $DRUKMIX_REPO && git rebase --abort (or resolve + --continue)"
+  fi
+  if [[ -f "$DRUKMIX_REPO/.git/MERGE_HEAD" ]]; then
+    die "git merge in progress in repo. Run: cd $DRUKMIX_REPO && git merge --abort (or resolve + commit)"
+  fi
+
   git -C "$DRUKMIX_REPO" pull --rebase
   echo "OK: fetched latest repo"
 }
