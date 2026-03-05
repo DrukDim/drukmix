@@ -222,7 +222,7 @@ def load_config(path: str) -> Cfg:
         serial_baud=_get_int(s, "serial_baud", 921600),
 
         client_name=_get_str(s, "client_name", "drukmix"),
-        client_version=_get_str(s, "client_version", "2.0.0"),
+        client_version=_get_str(s, "client_version", "2.2.0"),
         client_type=_get_str(s, "client_type", "agent"),
         client_url=_get_str(s, "client_url", "https://drukos.local/drukmix"),
 
