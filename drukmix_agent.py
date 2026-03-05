@@ -1,13 +1,4 @@
 #!/usr/bin/env python3
-# DrukMix Moonraker Agent
-# - Klipper macro -> Moonraker remote_method -> this agent -> USB bridge -> ESP-NOW -> Pump
-#
-# Ключові моменти:
-# 1) РІВНО ОДНА корутина читає Moonraker websocket (демультиплексор id/notify), щоб не було “локів”.
-# 2) drukmix.cfg дозволяє inline-коментарі після значення (key = 1.0  # comment) — агент це ковтає.
-# 3) AUTO режим рахує LPM із motion_report.live_extruder_velocity (mm/s) та "віртуального філамента"
-#    з filament_diameter у [extruder] (printer.cfg), помножено на extrude_factor та flow_gain.
-
 import asyncio
 import configparser
 import dataclasses
@@ -25,12 +16,24 @@ from typing import Any, Dict, Optional, Tuple
 import serial
 import websockets
 
-# ---- USB protocol constants (must match bridge firmware) ----
+# ---------------- USB protocol (must match bridge firmware) ----------------
 PROTO = 1
 USB_SET_FLOW = 1       # body: i32 milli_lpm, u8 flags
 USB_SET_MAXLPM = 3     # body: i32 pump_max_milli_lpm
 USB_BRIDGE_STATUS = 101
+
+# Pump flags (passed through bridge)
+FLAG_REV = 0x01
 FLAG_STOP = 0x02
+FLAG_AUTO = 0x04
+
+# Pump err_flags bits (from pump firmware)
+EF_MANUAL_FWD = 0x0010
+EF_MANUAL_REV = 0x0020
+EF_AUTO_ALLOWED = 0x0040
+EF_AUTO_ACTIVE = 0x0080
+EF_DIR_ASSERTED = 0x0100
+EF_WIPER_TPL = 0x0200
 
 
 # ----------------- low-level helpers -----------------
@@ -93,39 +96,6 @@ def build_usb_packet(msg_type: int, seq: int, body: bytes) -> bytes:
     return cobs_encode(payload) + b"\x00"
 
 
-def parse_bridge_status(payload: bytes) -> Optional[Dict[str, Any]]:
-    # payload: [proto,msg_type,seq,mono_ms] + body + crc
-    if len(payload) < 10:
-        return None
-    got_crc = struct.unpack_from("<H", payload, len(payload) - 2)[0]
-    calc_crc = crc16_ccitt_false(payload[:-2])
-    if got_crc != calc_crc:
-        return None
-
-    proto, msg_type, seq, mono_ms = struct.unpack_from("<BBHI", payload, 0)
-    if proto != PROTO or msg_type != USB_BRIDGE_STATUS:
-        return None
-
-    body = payload[8:-2]
-
-    # Мінімум, який використовує агент (узгодь з прошивкою bridge):
-    # pump_link:u8 (0/1)
-    # last_seen_div10:u16 (вік heartbeat насоса, одиниця 10мс; 65535=unknown)
-    # ... (можуть бути інші поля)
-    # applied_code:u8 (байт коду застосованого керування)
-    #
-    # У твоєму старому варіанті applied_code сидів на offset=5
-    if len(body) < 6:
-        return None
-
-    pump_link = body[0]
-    last_seen_div10 = struct.unpack_from("<H", body, 1)[0]
-    applied_code = body[5]
-    age_ms = None if last_seen_div10 == 65535 else int(last_seen_div10) * 10
-
-    return {"pump_link": int(pump_link), "age_ms": age_ms, "code": int(applied_code)}
-
-
 def clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
 
@@ -148,22 +118,29 @@ class Cfg:
     min_run_hold_s: float
     flow_gain: float
 
+    retract_deadband_mm_s: float
+    retract_gain: float
+
     printer_cfg: str
     filament_diameter_fallback: float
 
     update_hz: float
     poll_hz: float
 
-    bridge_offline_timeout_s: float
-    pump_offline_timeout_s: float
-    pause_on_fault: bool
-    pause_timeout_s: float
+    # Safety policies
+    pause_on_pump_offline: bool
+    pause_on_manual_during_print: bool
     ui_notify: bool
 
+    bridge_offline_timeout_s: float
+    pump_offline_timeout_s: float
+
+    # Logging
     log_file: str
     log_level: str
     log_period_s: float
 
+    # FLUSH reliability
     flush_burst_count: int
     flush_burst_interval_ms: int
     flush_confirm: bool
@@ -176,9 +153,6 @@ class Cfg:
 
 
 def _strip_inline_comment(v: str) -> str:
-    # Дозволяємо:
-    #   key = 1.23   # comment
-    #   key = 1.23   ; comment
     if v is None:
         return ""
     v = str(v)
@@ -194,7 +168,6 @@ def _get_float(s: configparser.SectionProxy, key: str, default: float) -> float:
 
 def _get_int(s: configparser.SectionProxy, key: str, default: int) -> int:
     raw = s.get(key, str(default))
-    # допускаємо "20.0" як int
     return int(float(_strip_inline_comment(raw)))
 
 
@@ -204,7 +177,6 @@ def _get_str(s: configparser.SectionProxy, key: str, default: str) -> str:
 
 
 def load_config(path: str) -> Cfg:
-    # inline_comment_prefixes дозволяє ConfigParser ігнорувати коментарі після значення
     cp = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
     if not cp.read(path):
         raise FileNotFoundError(path)
@@ -231,17 +203,21 @@ def load_config(path: str) -> Cfg:
         min_run_hold_s=_get_float(s, "min_run_hold_s", 5.0),
         flow_gain=_get_float(s, "flow_gain", 1.0),
 
+        retract_deadband_mm_s=_get_float(s, "retract_deadband_mm_s", 0.20),
+        retract_gain=_get_float(s, "retract_gain", 1.0),
+
         printer_cfg=_get_str(s, "printer_cfg", os.path.expanduser("~/printer_data/config/printer.cfg")),
         filament_diameter_fallback=_get_float(s, "filament_diameter_fallback", 35.0),
 
         update_hz=_get_float(s, "update_hz", 6.0),
         poll_hz=_get_float(s, "poll_hz", 0.5),
 
+        pause_on_pump_offline=get_bool("pause_on_pump_offline", True),
+        pause_on_manual_during_print=get_bool("pause_on_manual_during_print", True),
+        ui_notify=get_bool("ui_notify", True),
+
         bridge_offline_timeout_s=_get_float(s, "bridge_offline_timeout_s", 1.0),
         pump_offline_timeout_s=_get_float(s, "pump_offline_timeout_s", 1.2),
-        pause_on_fault=get_bool("pause_on_fault", True),
-        pause_timeout_s=_get_float(s, "pause_timeout_s", 2.0),
-        ui_notify=get_bool("ui_notify", True),
 
         log_file=_get_str(s, "log_file", os.path.expanduser("~/printer_data/logs/drukmix.log")),
         log_level=_get_str(s, "log_level", "info").lower(),
@@ -261,7 +237,6 @@ def load_config(path: str) -> Cfg:
 
 # ----------------- printer cfg reading -----------------
 def read_filament_diameter_from_printer_cfg(path: str, fallback: float) -> float:
-    # Читаємо filament_diameter з [extruder]
     try:
         txt = open(path, "r", encoding="utf-8", errors="ignore").read()
     except Exception:
@@ -279,7 +254,6 @@ def read_filament_diameter_from_printer_cfg(path: str, fallback: float) -> float
 
 
 def liters_per_mm_from_diameter_mm(d: float) -> float:
-    # L/mm = (π*(d/2)^2 mm^2) / 1_000_000 (mm^3 per liter)
     r = d / 2.0
     area_mm2 = math.pi * r * r
     return area_mm2 / 1_000_000.0
@@ -288,12 +262,12 @@ def liters_per_mm_from_diameter_mm(d: float) -> float:
 # ----------------- runtime state -----------------
 @dataclasses.dataclass
 class KlipperState:
-    print_state: str = "unknown"      # print_stats.state: printing/paused/complete/standby/...
-    idle_state: str = "unknown"       # idle_timeout.state: Printing/Ready/Idle
-    is_paused: bool = False           # pause_resume.is_paused
-    klippy_state: str = "unknown"     # webhooks.state: ready/shutdown/...
-    extrude_factor: float = 1.0       # gcode_move.extrude_factor
-    live_extruder_velocity: float = 0.0  # motion_report.live_extruder_velocity (mm/s)
+    print_state: str = "unknown"
+    idle_state: str = "unknown"
+    is_paused: bool = False
+    klippy_state: str = "unknown"
+    extrude_factor: float = 1.0
+    live_extruder_velocity: float = 0.0
 
 
 @dataclasses.dataclass
@@ -302,6 +276,7 @@ class LinkState:
     pump_link: int = 0
     age_ms: Optional[int] = None
     last_code: int = 0
+    err_flags: int = 0
 
 
 @dataclasses.dataclass
@@ -314,10 +289,7 @@ class FlushState:
 @dataclasses.dataclass
 class Overrides:
     gain: Optional[float] = None
-    pump_max_lpm: Optional[float] = None
-    min_run_lpm: Optional[float] = None
-    min_run_hold_s: Optional[float] = None
-    log_level: Optional[str] = None  # off|info|debug
+    log_level: Optional[str] = None
 
 
 # ----------------- logging setup -----------------
@@ -327,7 +299,6 @@ def setup_logger(log_file: str) -> logging.Logger:
     lg.handlers.clear()
 
     os.makedirs(os.path.dirname(log_file), exist_ok=True)
-
     fh = RotatingFileHandler(log_file, maxBytes=5_000_000, backupCount=5)
     fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
     fh.setFormatter(fmt)
@@ -336,18 +307,11 @@ def setup_logger(log_file: str) -> logging.Logger:
     sh = logging.StreamHandler()
     sh.setFormatter(fmt)
     lg.addHandler(sh)
-
     return lg
 
 
-# ----------------- Moonraker client (single reader demux) -----------------
+# ----------------- Moonraker client -----------------
 class MoonrakerClient:
-    """
-    ВАЖЛИВО:
-    Рівно ОДНА корутина читає websocket.
-    Відповіді з "id" -> pending Futures
-    Нотифікації без id -> notify queue
-    """
     def __init__(self, ws_url: str, cfg: Cfg):
         self.ws_url = ws_url
         self.cfg = cfg
@@ -370,20 +334,17 @@ class MoonrakerClient:
             "url": self.cfg.client_url,
         })
 
-        # Реєструємо remote methods, які викликаються з Klipper макросів
         for m in (
+            "drukmix_ping",
+            "drukmix_status",
             "drukmix_flush",
             "drukmix_flush_stop",
             "drukmix_set_gain",
-            "drukmix_set_limits",
             "drukmix_set_debug",
-            "drukmix_clear_overrides",
             "drukmix_reload_cfg",
-            "drukmix_ping",
         ):
             await self.call("connection.register_remote_method", {"method_name": m})
 
-        # Підписка на ключові об'єкти Klipper
         await self.call("printer.objects.subscribe", {
             "objects": {
                 "print_stats": ["state"],
@@ -406,6 +367,8 @@ class MoonrakerClient:
             self._reader_task.cancel()
             try:
                 await self._reader_task
+            except asyncio.CancelledError:
+                pass
             except Exception:
                 pass
             self._reader_task = None
@@ -415,7 +378,6 @@ class MoonrakerClient:
             while True:
                 raw = await self._ws.recv()
                 msg = json.loads(raw)
-
                 if "id" in msg:
                     req_id = msg["id"]
                     fut = self._pending.pop(req_id, None)
@@ -426,9 +388,7 @@ class MoonrakerClient:
                             fut.set_result(msg.get("result"))
                 else:
                     await self._notify_q.put(msg)
-
         except Exception as e:
-            # Завалити всі pending, щоб call() не висів вічно
             for fut in self._pending.values():
                 if fut and not fut.done():
                     fut.set_exception(e)
@@ -442,13 +402,10 @@ class MoonrakerClient:
         req = {"jsonrpc": "2.0", "method": method, "id": req_id}
         if params is not None:
             req["params"] = params
-
         fut = asyncio.get_running_loop().create_future()
         self._pending[req_id] = fut
-
         async with self._send_lock:
             await self._ws.send(json.dumps(req))
-
         return await fut
 
     def notify_nowait(self) -> Optional[dict]:
@@ -458,11 +415,10 @@ class MoonrakerClient:
             return None
 
     async def respond(self, level: str, msg: str):
-        # Відповідь у Mainsail terminal
         if level not in ("echo", "command", "error"):
             level = "echo"
         safe = msg.replace('"', "'")
-        script = f'ReSPOND TYPE={level} MSG="{safe}"'.replace("ReSPOND", "RESPOND")
+        script = f'RESPOND TYPE={level} MSG="{safe}"'
         await self.call("printer.gcode.script", {"script": script})
 
     async def pause_print(self):
@@ -470,6 +426,36 @@ class MoonrakerClient:
 
 
 # ----------------- Bridge serial -----------------
+def parse_bridge_status(payload: bytes) -> Optional[Dict[str, Any]]:
+    if len(payload) < 10:
+        return None
+    got_crc = struct.unpack_from("<H", payload, len(payload) - 2)[0]
+    calc_crc = crc16_ccitt_false(payload[:-2])
+    if got_crc != calc_crc:
+        return None
+
+    proto, msg_type, seq, mono_ms = struct.unpack_from("<BBHI", payload, 0)
+    if proto != PROTO or msg_type != USB_BRIDGE_STATUS:
+        return None
+
+    body = payload[8:-2]
+    if len(body) < (1 + 2 + 2 + 1 + 2 + 2 + 2 + 4):
+        return None
+
+    pump_link = body[0]
+    last_seen_div10 = struct.unpack_from("<H", body, 1)[0]
+    applied_code = body[5]
+    err_flags = struct.unpack_from("<H", body, 6)[0]
+    age_ms = None if last_seen_div10 == 65535 else int(last_seen_div10) * 10
+
+    return {
+        "pump_link": int(pump_link),
+        "age_ms": age_ms,
+        "code": int(applied_code),
+        "err_flags": int(err_flags),
+    }
+
+
 class BridgeSerial:
     def __init__(self, port: str, baud: int):
         self.port = port
@@ -494,10 +480,9 @@ class BridgeSerial:
         self.seq = (self.seq + 1) & 0xFFFF
         self.ser.write(pkt)
 
-    def send_flow(self, lpm: float, stop: bool):
+    def send_flow(self, lpm: float, flags: int):
         milli = int(lpm * 1000)
-        flags = FLAG_STOP if stop else 0
-        pkt = build_usb_packet(USB_SET_FLOW, self.seq, struct.pack("<iB", milli, flags))
+        pkt = build_usb_packet(USB_SET_FLOW, self.seq, struct.pack("<iB", milli, flags & 0xFF))
         self.seq = (self.seq + 1) & 0xFFFF
         self.ser.write(pkt)
 
@@ -547,23 +532,26 @@ def apply_status(ks: KlipperState, st: Dict[str, Any]) -> None:
             ks.live_extruder_velocity = 0.0
 
 
-def expected_code(lpm: float, max_lpm: float) -> int:
-    if max_lpm <= 0:
-        return 0
-    c = int(round((clamp(lpm, 0.0, max_lpm) / max_lpm) * 255.0))
-    return int(clamp(c, 0, 255))
+def is_printing(ks: KlipperState) -> bool:
+    ps = ks.print_state.lower()
+    it = ks.idle_state.lower()
+    return (ps == "printing") or (it == "printing")
 
 
 def parse_remote_call(msg: dict) -> Optional[Tuple[str, dict]]:
-    # Moonraker remote_method приходить як notification:
-    # {"jsonrpc":"2.0","method":"drukmix_ping","params":{...}}
     m = msg.get("method")
-    if not isinstance(m, str):
-        return None
-    if not m.startswith("drukmix_"):
+    if not isinstance(m, str) or not m.startswith("drukmix_"):
         return None
     p = msg.get("params") or {}
     return (m, p) if isinstance(p, dict) else (m, {})
+
+
+def decode_mode(err_flags: int) -> str:
+    if err_flags & EF_MANUAL_FWD:
+        return "MANUAL_FWD"
+    if err_flags & EF_MANUAL_REV:
+        return "MANUAL_REV"
+    return "AUTO"
 
 
 # ----------------- agent main -----------------
@@ -575,7 +563,7 @@ async def run_agent(cfg_path: str):
 
     log = setup_logger(cfg.log_file)
 
-    # hard single-instance lock
+    # single instance lock
     lock_path = os.path.expanduser("~/printer_data/logs/drukmix.lock")
     os.makedirs(os.path.dirname(lock_path), exist_ok=True)
     lock_fd = open(lock_path, "w")
@@ -598,32 +586,21 @@ async def run_agent(cfg_path: str):
     last_poll_t = 0.0
     last_cfg_check = 0.0
     last_cfg_mtime = 0.0
-    last_nonzero_t = 0.0
 
-    last_bridge_ok = True
-    last_pump_ok = True
-
-    fault_since: Optional[float] = None
-    paused_once = False
-
-    last_info_log = 0.0
-    last_debug_log = 0.0
-
-    def eff_log_level() -> str:
-        lvl = (ov.log_level or cfg.log_level or "info").lower()
-        return lvl if lvl in ("off", "info", "debug") else "info"
+    # transition tracking for UI messages
+    last_bridge_ok = None
+    last_pump_ok = None
+    last_mode = None  # MANUAL_FWD / MANUAL_REV / AUTO
+    last_pause_reason = None
+    last_state_msg_t = 0.0
+    last_log_t = 0.0
 
     def eff_gain() -> float:
         return float(ov.gain) if ov.gain is not None else cfg.flow_gain
 
-    def eff_pump_max_lpm() -> float:
-        return float(ov.pump_max_lpm) if ov.pump_max_lpm is not None else cfg.pump_max_lpm
-
-    def eff_min_run_lpm() -> float:
-        return float(ov.min_run_lpm) if ov.min_run_lpm is not None else cfg.min_run_lpm
-
-    def eff_min_run_hold_s() -> float:
-        return float(ov.min_run_hold_s) if ov.min_run_hold_s is not None else cfg.min_run_hold_s
+    def eff_log_level() -> str:
+        lvl = (ov.log_level or cfg.log_level or "info").lower()
+        return lvl if lvl in ("off", "info", "debug") else "info"
 
     def send_period() -> float:
         return 1.0 / max(cfg.update_hz, 0.5)
@@ -631,60 +608,66 @@ async def run_agent(cfg_path: str):
     def poll_period() -> float:
         return 1.0 / max(cfg.poll_hz, 0.1)
 
-    def is_print_active() -> bool:
-        # Сигнал “йде друк” може бути як:
-        #  - print_stats.state == "printing"
-        #  - idle_timeout.state == "Printing"
-        ps = ks.print_state.lower()
-        it = ks.idle_state.lower()
-        return (ps == "printing") or (it == "printing")
-
-    async def log_line(line: str):
-        nonlocal last_info_log, last_debug_log
-        lvl = eff_log_level()
+    async def maybe_respond(level: str, msg: str, min_interval_s: float = 0.4):
+        nonlocal last_state_msg_t
+        if not cfg.ui_notify:
+            return
         now = time.monotonic()
-        if lvl == "off":
+        if now - last_state_msg_t < min_interval_s:
             return
-        if lvl == "debug":
-            if now - last_debug_log >= 1.0:
-                last_debug_log = now
-                log.info(line)
-            return
-        if now - last_info_log >= max(0.5, cfg.log_period_s):
-            last_info_log = now
-            log.info(line)
+        last_state_msg_t = now
+        try:
+            await mr.respond(level, msg)
+        except Exception:
+            pass
 
-    async def burst_send(bridge: BridgeSerial, lpm: float, stop: bool):
+    async def pause_with_popup(reason: str):
+        # prevent spamming pause calls
+        nonlocal last_pause_reason
+        if ks.is_paused:
+            return
+        if last_pause_reason == reason:
+            return
+        last_pause_reason = reason
+        try:
+            await mr.pause_print()
+        except Exception:
+            pass
+        await maybe_respond("error", reason, min_interval_s=0.0)
+
+    async def burst_send(lpm: float, flags: int):
         count = max(1, int(cfg.flush_burst_count))
         interval = max(0.0, float(cfg.flush_burst_interval_ms)) / 1000.0
         for _ in range(count):
             try:
-                bridge.send_flow(lpm, stop=stop)
+                bridge.send_flow(lpm, flags)
             except Exception:
                 pass
             if interval > 0:
                 await asyncio.sleep(interval)
 
-    async def confirm_applied(target_lpm: float, stop: bool) -> bool:
-        max_lpm = eff_pump_max_lpm()
-        want = 0 if stop else expected_code(target_lpm, max_lpm)
+    async def confirm_applied(want_code: int, stop: bool) -> bool:
         tol = int(clamp(cfg.flush_confirm_tolerance_code, 0, 50))
         deadline = time.monotonic() + max(0.05, cfg.flush_confirm_timeout_s)
-
         while time.monotonic() < deadline:
             if stop:
                 if ls.last_code == 0:
                     return True
             else:
-                if abs(ls.last_code - want) <= tol:
+                if abs(ls.last_code - want_code) <= tol:
                     return True
-
             status_event.clear()
             try:
                 await asyncio.wait_for(status_event.wait(), timeout=0.10)
             except asyncio.TimeoutError:
                 pass
         return False
+
+    def expected_code(lpm: float, max_lpm: float) -> int:
+        if max_lpm <= 0:
+            return 0
+        c = int(round((clamp(lpm, 0.0, max_lpm) / max_lpm) * 255.0))
+        return int(clamp(c, 0, 255))
 
     log.info(f"drukmix: start filament_d={filament_d} liters/mm={liters_per_mm:.6f} gain={cfg.flow_gain}")
 
@@ -701,10 +684,9 @@ async def run_agent(cfg_path: str):
             await mr.connect()
             backoff = 0.5
 
-            # застосувати max_lpm у bridge при старті (override має пріоритет)
-            bridge.send_set_maxlpm(eff_pump_max_lpm())
+            bridge.send_set_maxlpm(cfg.pump_max_lpm)
 
-            # стартовий snapshot (щоб не чекати нотифікацій)
+            # initial snapshot
             try:
                 res = await mr.call("printer.objects.query", {"objects": {
                     "print_stats": ["state"],
@@ -720,8 +702,6 @@ async def run_agent(cfg_path: str):
             except Exception:
                 pass
 
-            log.info("drukmix: running")
-
             async def serial_reader():
                 while True:
                     now = time.monotonic()
@@ -731,6 +711,7 @@ async def run_agent(cfg_path: str):
                             ls.pump_link = st.get("pump_link", 0)
                             ls.age_ms = st.get("age_ms", None)
                             ls.last_code = st.get("code", 0)
+                            ls.err_flags = st.get("err_flags", 0)
                             status_event.set()
                     except Exception:
                         pass
@@ -738,10 +719,12 @@ async def run_agent(cfg_path: str):
 
             serial_task = asyncio.create_task(serial_reader())
 
+            log.info("drukmix: running")
+
             while True:
                 now = time.monotonic()
 
-                # cfg reload (base values only; overrides stay)
+                # cfg reload
                 if now - last_cfg_check >= max(0.5, cfg.cfg_reload_s):
                     last_cfg_check = now
                     try:
@@ -753,55 +736,58 @@ async def run_agent(cfg_path: str):
                         new_cfg = load_config(cfg.cfg_path)
                         new_cfg.cfg_path = cfg.cfg_path
                         cfg = new_cfg
-
                         filament_d = read_filament_diameter_from_printer_cfg(cfg.printer_cfg, cfg.filament_diameter_fallback)
                         liters_per_mm = liters_per_mm_from_diameter_mm(filament_d)
-
-                        if ov.pump_max_lpm is None:
-                            try:
-                                bridge.send_set_maxlpm(cfg.pump_max_lpm)
-                            except Exception:
-                                pass
-
-                        if cfg.ui_notify:
-                            try:
-                                await mr.respond("command", f"DrukMix: cfg reloaded (gain={cfg.flow_gain})")
-                            except Exception:
-                                pass
+                        try:
+                            bridge.send_set_maxlpm(cfg.pump_max_lpm)
+                        except Exception:
+                            pass
+                        await maybe_respond("command", f"DrukMix: cfg reloaded (gain={cfg.flow_gain})")
 
                 # link health
                 bridge_ok = (ls.last_bridge_frame_t != 0.0) and ((now - ls.last_bridge_frame_t) < cfg.bridge_offline_timeout_s)
-                pump_ok = (
-                    bridge_ok
-                    and (ls.pump_link == 1)
-                    and (ls.age_ms is not None)
-                    and (ls.age_ms < int(cfg.pump_offline_timeout_s * 1000))
-                )
+                pump_ok = bridge_ok and (ls.pump_link == 1) and (ls.age_ms is not None) and (ls.age_ms < int(cfg.pump_offline_timeout_s * 1000))
 
-                # UI transitions
+                # pump mode from err_flags
+                mode = decode_mode(ls.err_flags)
+
+                # transitions -> terminal messages
+                if last_bridge_ok is None:
+                    last_bridge_ok = bridge_ok
+                if last_pump_ok is None:
+                    last_pump_ok = pump_ok
+                if last_mode is None:
+                    last_mode = mode
+
                 if cfg.ui_notify:
                     if last_bridge_ok and not bridge_ok:
-                        try: await mr.respond("error", "DrukMix: USB bridge offline")
-                        except Exception: pass
+                        await maybe_respond("error", "DrukMix: USB bridge offline")
                     if (not last_bridge_ok) and bridge_ok:
-                        try: await mr.respond("echo", "DrukMix: USB bridge online")
-                        except Exception: pass
+                        await maybe_respond("command", "DrukMix: USB bridge online")
+
                     if last_pump_ok and not pump_ok:
-                        try: await mr.respond("error", "DrukMix: pump offline (ESP-NOW)")
-                        except Exception: pass
+                        await maybe_respond("error", "DrukMix: pump offline (ESP-NOW)")
                     if (not last_pump_ok) and pump_ok:
-                        try: await mr.respond("echo", "DrukMix: pump online")
-                        except Exception: pass
+                        await maybe_respond("command", "DrukMix: pump online")
+
+                    if mode != last_mode:
+                        if mode == "MANUAL_FWD":
+                            await maybe_respond("command", "DrukMix: mode MANUAL FORWARD")
+                        elif mode == "MANUAL_REV":
+                            await maybe_respond("command", "DrukMix: mode MANUAL REVERSE")
+                        else:
+                            await maybe_respond("command", "DrukMix: mode AUTO")
+
                 last_bridge_ok = bridge_ok
                 last_pump_ok = pump_ok
+                last_mode = mode
 
-                # consume notifications fast (remote calls + status updates)
+                # consume notifications
                 for _ in range(200):
                     msg = mr.notify_nowait()
                     if not msg:
                         break
 
-                    # status updates from subscribe
                     if msg.get("method") == "notify_status_update":
                         params = msg.get("params", [])
                         if params and isinstance(params[0], dict):
@@ -812,36 +798,57 @@ async def run_agent(cfg_path: str):
                     if not rc:
                         continue
                     rmethod, params = rc
-                    log.info(f"drukmix: got remote {rmethod} params={params}")
 
                     if rmethod == "drukmix_ping":
-                        if cfg.ui_notify:
-                            try: await mr.respond("command", "DrukMix: ping OK")
-                            except Exception: pass
+                        await maybe_respond("command", "DrukMix: ping OK", min_interval_s=0.0)
+
+                    elif rmethod == "drukmix_status":
+                        txt = (
+                            f"DrukMix: mode={mode} pump_ok={int(pump_ok)} bridge_ok={int(bridge_ok)} "
+                            f"age_ms={ls.age_ms} code={ls.last_code} err=0x{ls.err_flags:04x}"
+                        )
+                        await maybe_respond("command", txt, min_interval_s=0.0)
+
+                    elif rmethod == "drukmix_set_gain":
+                        clear = str(params.get("clear", "false")).lower() in ("1", "true", "yes", "on")
+                        if clear:
+                            ov.gain = None
+                            await maybe_respond("command", f"DrukMix: gain=cfg({cfg.flow_gain})", min_interval_s=0.0)
+                        else:
+                            ov.gain = max(0.0, float(params.get("gain", cfg.flow_gain)))
+                            await maybe_respond("command", f"DrukMix: gain={ov.gain}", min_interval_s=0.0)
+
+                    elif rmethod == "drukmix_set_debug":
+                        lvl = str(params.get("level", "info")).strip().lower()
+                        if lvl in ("off", "info", "debug"):
+                            ov.log_level = lvl
+                            await maybe_respond("command", f"DrukMix: log_level={lvl}", min_interval_s=0.0)
+
+                    elif rmethod == "drukmix_reload_cfg":
+                        last_cfg_mtime = 0.0
+                        await maybe_respond("command", "DrukMix: cfg reload requested", min_interval_s=0.0)
 
                     elif rmethod == "drukmix_flush":
-                        req_lpm = float(params.get("lpm", eff_pump_max_lpm()))
+                        req_lpm = float(params.get("lpm", cfg.pump_max_lpm))
                         dur = float(params.get("duration", 0.0))
-                        req_lpm = clamp(req_lpm, 0.0, eff_pump_max_lpm())
+                        req_lpm = clamp(req_lpm, 0.0, cfg.pump_max_lpm)
                         fs.active = True
                         fs.lpm = req_lpm
-                        fs.until_t = (now + dur) if dur > 0 else 0.0
+                        fs.until_t = (time.monotonic() + dur) if dur > 0 else 0.0
 
                         async def do_flush():
-                            await burst_send(bridge, req_lpm, stop=False)
+                            flags = FLAG_AUTO  # allow output
+                            await burst_send(req_lpm, flags)
                             ok = True
                             if cfg.flush_confirm:
-                                ok = await confirm_applied(req_lpm, stop=False)
+                                want = expected_code(req_lpm, cfg.pump_max_lpm)
+                                ok = await confirm_applied(want, stop=False)
                                 tries = 0
                                 while (not ok) and tries < cfg.flush_confirm_retries:
                                     tries += 1
-                                    await burst_send(bridge, req_lpm, stop=False)
-                                    ok = await confirm_applied(req_lpm, stop=False)
-                            if cfg.ui_notify:
-                                try:
-                                    await mr.respond("command" if ok else "error", f"DrukMix: FLUSH {req_lpm:.3f} LPM")
-                                except Exception:
-                                    pass
+                                    await burst_send(req_lpm, flags)
+                                    ok = await confirm_applied(want, stop=False)
+                            await maybe_respond("command" if ok else "error", f"DrukMix: FLUSH {req_lpm:.3f} LPM", min_interval_s=0.0)
 
                         asyncio.create_task(do_flush())
 
@@ -851,74 +858,23 @@ async def run_agent(cfg_path: str):
                         fs.until_t = 0.0
 
                         async def do_stop():
-                            await burst_send(bridge, 0.0, stop=True)
+                            flags = FLAG_STOP
+                            await burst_send(0.0, flags)
                             ok = True
                             if cfg.flush_confirm:
-                                ok = await confirm_applied(0.0, stop=True)
+                                ok = await confirm_applied(0, stop=True)
                                 tries = 0
                                 while (not ok) and tries < cfg.flush_confirm_retries:
                                     tries += 1
-                                    await burst_send(bridge, 0.0, stop=True)
-                                    ok = await confirm_applied(0.0, stop=True)
-                            if cfg.ui_notify:
-                                try:
-                                    await mr.respond("command" if ok else "error", "DrukMix: FLUSH STOP")
-                                except Exception:
-                                    pass
+                                    await burst_send(0.0, flags)
+                                    ok = await confirm_applied(0, stop=True)
+                            await maybe_respond("command" if ok else "error", "DrukMix: FLUSH STOP", min_interval_s=0.0)
 
                         asyncio.create_task(do_stop())
 
-                    elif rmethod == "drukmix_set_gain":
-                        clear = str(params.get("clear", "false")).lower() in ("1", "true", "yes", "on")
-                        if clear:
-                            ov.gain = None
-                            if cfg.ui_notify:
-                                try: await mr.respond("command", f"DrukMix: gain=cfg({cfg.flow_gain})")
-                                except Exception: pass
-                        else:
-                            ov.gain = max(0.0, float(params.get("gain", cfg.flow_gain)))
-                            if cfg.ui_notify:
-                                try: await mr.respond("command", f"DrukMix: gain={ov.gain}")
-                                except Exception: pass
-
-                    elif rmethod == "drukmix_set_limits":
-                        if "pump_max_lpm" in params:
-                            ov.pump_max_lpm = max(0.1, float(params["pump_max_lpm"]))
-                            try: bridge.send_set_maxlpm(eff_pump_max_lpm())
-                            except Exception: pass
-                        if "min_run_lpm" in params:
-                            ov.min_run_lpm = max(0.0, float(params["min_run_lpm"]))
-                        if "min_run_hold_s" in params:
-                            ov.min_run_hold_s = max(0.0, float(params["min_run_hold_s"]))
-                        if cfg.ui_notify:
-                            try: await mr.respond("command", "DrukMix: limits updated (override)")
-                            except Exception: pass
-
-                    elif rmethod == "drukmix_set_debug":
-                        lvl = str(params.get("level", "info")).strip().lower()
-                        if lvl in ("off", "info", "debug"):
-                            ov.log_level = lvl
-                            if cfg.ui_notify:
-                                try: await mr.respond("command", f"DrukMix: log_level={lvl}")
-                                except Exception: pass
-
-                    elif rmethod == "drukmix_clear_overrides":
-                        ov = Overrides()
-                        try: bridge.send_set_maxlpm(cfg.pump_max_lpm)
-                        except Exception: pass
-                        if cfg.ui_notify:
-                            try: await mr.respond("command", "DrukMix: overrides cleared (cfg active)")
-                            except Exception: pass
-
-                    elif rmethod == "drukmix_reload_cfg":
-                        last_cfg_mtime = 0.0
-                        if cfg.ui_notify:
-                            try: await mr.respond("command", "DrukMix: cfg reload requested")
-                            except Exception: pass
-
-                # periodic poll (повільний fallback)
-                if now - last_poll_t >= poll_period():
-                    last_poll_t = now
+                # periodic poll fallback
+                if time.monotonic() - last_poll_t >= poll_period():
+                    last_poll_t = time.monotonic()
                     try:
                         res = await mr.call("printer.objects.query", {"objects": {
                             "print_stats": ["state"],
@@ -934,114 +890,109 @@ async def run_agent(cfg_path: str):
                     except Exception:
                         pass
 
-                # flush duration autostop
-                if fs.active and fs.until_t > 0.0 and now >= fs.until_t:
+                # flush autostop by duration
+                if fs.active and fs.until_t > 0.0 and time.monotonic() >= fs.until_t:
                     fs.active = False
                     fs.lpm = 0.0
                     fs.until_t = 0.0
-                    asyncio.create_task(burst_send(bridge, 0.0, stop=True))
 
                 klippy_ready = (ks.klippy_state == "ready")
-                printing = is_print_active()
-                active_motion = printing and (not ks.is_paused)
+                printing = is_printing(ks)
+                active_motion = printing and (not ks.is_paused) and klippy_ready
 
-                max_lpm = eff_pump_max_lpm()
-                min_run = eff_min_run_lpm()
-                hold_s = eff_min_run_hold_s()
+                # Safety pause conditions
+                if printing and (not ks.is_paused):
+                    if cfg.pause_on_pump_offline and (not pump_ok):
+                        await pause_with_popup("DrukMix: pump offline")
+                    elif cfg.pause_on_manual_during_print and (mode != "AUTO"):
+                        await pause_with_popup("DrukMix: switch MANUAL during print (set to AUTO)")
+
+                # Decide desired LPM and flags
+                max_lpm = cfg.pump_max_lpm
                 gain = eff_gain()
 
-                # ---- desired_lpm computation ----
                 if fs.active:
                     desired_lpm = clamp(fs.lpm, 0.0, max_lpm)
+                    flags = FLAG_AUTO if desired_lpm > 0.0 else FLAG_STOP
                 else:
-                    if (not klippy_ready) or (not active_motion):
+                    if (not active_motion) or (mode != "AUTO"):
                         desired_lpm = 0.0
+                        flags = FLAG_STOP
                     else:
-                        vel = max(0.0, float(ks.live_extruder_velocity))  # mm/s
-                        # LPM = (mm/s) * (L/mm) * 60
-                        desired_lpm = vel * liters_per_mm * 60.0
-                        desired_lpm *= max(0.0, float(ks.extrude_factor))
-                        desired_lpm *= max(0.0, float(gain))
-                        desired_lpm = clamp(desired_lpm, 0.0, max_lpm)
+                        vel = float(ks.live_extruder_velocity)
+                        dead = max(0.0, cfg.retract_deadband_mm_s)
+                        is_rev = vel < -dead
 
-                        if desired_lpm > 0.0:
-                            last_nonzero_t = now
+                        speed = abs(vel)
+                        lpm = speed * liters_per_mm * 60.0
+                        lpm *= max(0.0, float(ks.extrude_factor))
+                        lpm *= max(0.0, (cfg.retract_gain if is_rev else gain))
+                        lpm = clamp(lpm, 0.0, max_lpm)
 
-                        # min_run clamp
-                        if 0.0 < desired_lpm < min_run:
-                            desired_lpm = min_run
+                        # FWD-only min_run; no hold by default
+                        if not is_rev:
+                            if 0.0 < lpm < cfg.min_run_lpm:
+                                lpm = cfg.min_run_lpm
 
-                        # hold after stopping extrusion
-                        if desired_lpm == 0.0 and (now - last_nonzero_t) < hold_s:
-                            desired_lpm = min_run
+                        desired_lpm = lpm
+                        if desired_lpm <= 0.0:
+                            flags = FLAG_STOP
+                        else:
+                            flags = FLAG_AUTO | (FLAG_REV if is_rev else 0)
 
-                # ---- send to bridge ----
-                if now - last_send_t >= send_period():
-                    last_send_t = now
+                # Send to bridge periodically
+                if time.monotonic() - last_send_t >= send_period():
+                    last_send_t = time.monotonic()
                     try:
-                        bridge.send_flow(desired_lpm, stop=(desired_lpm <= 0.0))
+                        bridge.send_flow(desired_lpm, flags)
                     except Exception:
                         pass
 
-                # ---- pause on fault (AUTO only) ----
-                if (not fs.active) and active_motion and klippy_ready and cfg.pause_on_fault and (not pump_ok):
-                    if fault_since is None:
-                        fault_since = now
-                        paused_once = False
-                    elif (not paused_once) and (now - fault_since) >= cfg.pause_timeout_s:
-                        paused_once = True
-                        try:
-                            await mr.pause_print()
-                            if cfg.ui_notify:
-                                await mr.respond("error", "DrukMix: paused (pump offline)")
-                        except Exception:
-                            pass
-                else:
-                    fault_since = None
-                    paused_once = False
-
-                await log_line(
-                    f"drukmix: mode={'FLUSH' if fs.active else 'AUTO'} "
-                    f"print={ks.print_state} idle={ks.idle_state} paused={int(ks.is_paused)} "
-                    f"klippy={ks.klippy_state} vel={ks.live_extruder_velocity:.3f} ef={ks.extrude_factor:.3f} "
-                    f"gain={gain:.3f} lpm={desired_lpm:.3f} code={ls.last_code} "
-                    f"bridge_ok={int(bridge_ok)} pump_ok={int(pump_ok)} age_ms={ls.age_ms}"
-                )
+                # Logging (periodic)
+                lvl = eff_log_level()
+                if lvl != "off":
+                    do_log = (lvl == "debug") or ((time.monotonic() - last_log_t) >= max(0.5, cfg.log_period_s))
+                    if do_log:
+                        last_log_t = time.monotonic()
+                        log.info(
+                            f"drukmix: mode={'FLUSH' if fs.active else 'AUTO'} "
+                            f"print={ks.print_state} idle={ks.idle_state} paused={int(ks.is_paused)} klippy={ks.klippy_state} "
+                            f"vel={ks.live_extruder_velocity:.3f} ef={ks.extrude_factor:.3f} "
+                            f"lpm={desired_lpm:.3f} flags=0x{flags:02x} "
+                            f"bridge_ok={int(bridge_ok)} pump_ok={int(pump_ok)} age_ms={ls.age_ms} "
+                            f"sw={mode} err=0x{ls.err_flags:04x}"
+                        )
 
                 await asyncio.sleep(0.01)
 
         except Exception as e:
             log.error(f"drukmix: error: {e}")
-
-            # failsafe stop
             try:
                 if bridge and bridge.ser:
-                    bridge.send_flow(0.0, stop=True)
+                    bridge.send_flow(0.0, FLAG_STOP)
             except Exception:
                 pass
-
             try:
                 if serial_task:
                     serial_task.cancel()
                     try:
                         await serial_task
+                    except asyncio.CancelledError:
+                        pass
                     except Exception:
                         pass
             except Exception:
                 pass
-
             try:
                 if bridge:
                     bridge.close()
             except Exception:
                 pass
-
             try:
                 if mr:
                     await mr.close()
             except Exception:
                 pass
-
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2.0, 10.0)
 

@@ -10,6 +10,10 @@ Moonraker agent для синхронізації насосу (ESP-NOW) з Klip
 
 ## Встановлення (коротко)
 ```bash
+python3 -m venv ~/drukmix-venv
+~/drukmix-venv/bin/pip install -U pip
+~/drukmix-venv/bin/pip install -r requirements.txt
+
 sudo cp -f systemd/drukmix.service /etc/systemd/system/drukmix.service
 cp -f config/drukmix.cfg ~/printer_data/config/drukmix.cfg
 cp -f config/drukmix_macros.cfg ~/printer_data/config/drukmix_macros.cfg
@@ -19,3 +23,6 @@ chmod +x ~/drukmix_agent.py
 sudo systemctl daemon-reload
 sudo systemctl enable --now drukmix.service
 sudo systemctl restart drukmix.service
+```
+
+Потрібні Python-модулі: `pyserial`, `websockets`.
