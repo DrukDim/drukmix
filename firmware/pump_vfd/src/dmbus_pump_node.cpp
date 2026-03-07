@@ -56,7 +56,11 @@ void PumpVfdNode::update() {
     Serial.print(" running=");
     Serial.print(status_.running);
     Serial.print(" fault=");
-    Serial.println(status_.fault_code);
+    Serial.print(status_.fault_code);
+    Serial.print(" set_raw=");
+    Serial.print(status_.hw_setpoint_raw);
+    Serial.print(" speed_raw=");
+    Serial.println(status_.actual_speed_raw);
   }
 
   delay(2);
