@@ -48,6 +48,18 @@ static void usb_send_status(uint16_t seq_reply) {
   st.send_fail_count = g_now_state.send_fail_count;
   st.pump_max_milli_lpm = g_pump_max_milli_lpm;
 
+  st.pump_state = g_now_state.pump_state;
+  st.pump_fault_code = g_now_state.pump_fault_code;
+  st.pump_online = g_now_state.pump_online;
+  st.pump_running = g_now_state.pump_running;
+  st.target_milli_lpm = g_now_state.target_milli_lpm;
+  st.actual_milli_lpm = g_now_state.actual_milli_lpm;
+  st.hw_setpoint_raw = g_now_state.hw_setpoint_raw;
+  st.actual_freq_x10 = g_now_state.actual_freq_x10;
+  st.actual_speed_raw = g_now_state.actual_speed_raw;
+  st.output_current_x10 = g_now_state.output_current_x10;
+  st.pump_flags = g_now_state.pump_flags;
+
   g_usb.send_status(BRIDGE_PROTO, seq_reply, st);
 }
 

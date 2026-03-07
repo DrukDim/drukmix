@@ -98,14 +98,26 @@ class BridgeClient:
             if resp_type != USB_BRIDGE_STATUS:
                 continue
 
-            if len(body) < 15:
+            if len(body) < 42:
                 continue
 
-            pump_link = body[0]
-            last_seen_div10, last_ack_seq = struct.unpack_from("<HH", body, 1)
-            applied_code = body[5]
-            err_flags, retry_count, send_fail_count = struct.unpack_from("<HHH", body, 6)
-            pump_max_milli_lpm = struct.unpack_from("<i", body, 12)[0]
+            off = 0
+            pump_link = body[off]; off += 1
+            last_seen_div10, last_ack_seq = struct.unpack_from("<HH", body, off); off += 4
+            applied_code = body[off]; off += 1
+            err_flags, retry_count, send_fail_count = struct.unpack_from("<HHH", body, off); off += 6
+            pump_max_milli_lpm = struct.unpack_from("<i", body, off)[0]; off += 4
+
+            pump_state, pump_fault_code = struct.unpack_from("<HH", body, off); off += 4
+            pump_online = body[off]; off += 1
+            pump_running = body[off]; off += 1
+            target_milli_lpm = struct.unpack_from("<i", body, off)[0]; off += 4
+            actual_milli_lpm = struct.unpack_from("<i", body, off)[0]; off += 4
+            hw_setpoint_raw = struct.unpack_from("<i", body, off)[0]; off += 4
+            actual_freq_x10 = struct.unpack_from("<i", body, off)[0]; off += 4
+            actual_speed_raw = struct.unpack_from("<h", body, off)[0]; off += 2
+            output_current_x10 = struct.unpack_from("<H", body, off)[0]; off += 2
+            pump_flags = struct.unpack_from("<H", body, off)[0]; off += 2
 
             status = {
                 "ok": True,
@@ -121,6 +133,18 @@ class BridgeClient:
                 "retry_count": retry_count,
                 "send_fail_count": send_fail_count,
                 "pump_max_milli_lpm": pump_max_milli_lpm,
+
+                "pump_state": pump_state,
+                "pump_fault_code": pump_fault_code,
+                "pump_online": bool(pump_online),
+                "pump_running": bool(pump_running),
+                "target_milli_lpm": target_milli_lpm,
+                "actual_milli_lpm": actual_milli_lpm,
+                "hw_setpoint_raw": hw_setpoint_raw,
+                "actual_freq_x10": actual_freq_x10,
+                "actual_speed_raw": actual_speed_raw,
+                "output_current_x10": output_current_x10,
+                "pump_flags": pump_flags,
             }
 
             if resp_seq == seq:

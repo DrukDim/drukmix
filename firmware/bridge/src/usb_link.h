@@ -12,6 +12,18 @@ struct UsbStatusPayload {
   uint16_t retry_count = 0;
   uint16_t send_fail_count = 0;
   int32_t  pump_max_milli_lpm = 0;
+
+  uint16_t pump_state = 0;
+  uint16_t pump_fault_code = 0;
+  bool     pump_online = false;
+  bool     pump_running = false;
+  int32_t  target_milli_lpm = 0;
+  int32_t  actual_milli_lpm = 0;
+  int32_t  hw_setpoint_raw = 0;
+  int32_t  actual_freq_x10 = 0;
+  int16_t  actual_speed_raw = 0;
+  uint16_t output_current_x10 = 0;
+  uint16_t pump_flags = 0;
 };
 
 class UsbLink {

@@ -236,13 +236,15 @@ struct PumpSetMaxFlow {
   int32_t max_milli_lpm;
 };
 
-struct PumpStatusV1 {
+struct PumpStatus {
   StatusCommon c;
   int32_t target_milli_lpm;
   int32_t actual_milli_lpm;
   int32_t max_milli_lpm;
   int32_t hw_setpoint_raw;
+  int32_t actual_freq_x10;
   int16_t actual_speed_raw;
+  uint16_t output_current_x10;
   uint16_t link_flags;
   uint16_t pump_flags;
 };

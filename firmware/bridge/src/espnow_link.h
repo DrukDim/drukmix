@@ -1,6 +1,5 @@
 #pragma once
 #include <stdint.h>
-#include "bridge_proto.h"
 
 struct EspNowState {
   uint8_t  last_applied = 0;
@@ -14,6 +13,19 @@ struct EspNowState {
 
   uint16_t retry_count = 0;
   uint16_t send_fail_count = 0;
+
+  uint16_t pump_state = 0;
+  uint16_t pump_fault_code = 0;
+  bool     pump_online = false;
+  bool     pump_running = false;
+  int32_t  target_milli_lpm = 0;
+  int32_t  actual_milli_lpm = 0;
+  int32_t  max_milli_lpm = 0;
+  int32_t  hw_setpoint_raw = 0;
+  int32_t  actual_freq_x10 = 0;
+  int16_t  actual_speed_raw = 0;
+  uint16_t output_current_x10 = 0;
+  uint16_t pump_flags = 0;
 };
 
 void espnow_begin(int wifi_channel);

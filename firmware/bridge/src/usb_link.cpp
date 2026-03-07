@@ -30,7 +30,7 @@ bool UsbLink::poll_packet(uint8_t* out_decoded, size_t out_cap, size_t* out_len)
 }
 
 void UsbLink::send_status(uint8_t proto, uint16_t seq_reply, const UsbStatusPayload& st) {
-  uint8_t payload[128];
+  uint8_t payload[256];
   size_t off = 0;
 
   UsbHdr hdr{proto, USB_BRIDGE_STATUS, seq_reply, millis()};
@@ -46,10 +46,22 @@ void UsbLink::send_status(uint8_t proto, uint16_t seq_reply, const UsbStatusPayl
   *(uint16_t*)(payload + off) = st.send_fail_count; off += 2;
   *(int32_t*)(payload + off) = st.pump_max_milli_lpm; off += 4;
 
+  *(uint16_t*)(payload + off) = st.pump_state; off += 2;
+  *(uint16_t*)(payload + off) = st.pump_fault_code; off += 2;
+  payload[off++] = st.pump_online ? 1 : 0;
+  payload[off++] = st.pump_running ? 1 : 0;
+  *(int32_t*)(payload + off) = st.target_milli_lpm; off += 4;
+  *(int32_t*)(payload + off) = st.actual_milli_lpm; off += 4;
+  *(int32_t*)(payload + off) = st.hw_setpoint_raw; off += 4;
+  *(int32_t*)(payload + off) = st.actual_freq_x10; off += 4;
+  *(int16_t*)(payload + off) = st.actual_speed_raw; off += 2;
+  *(uint16_t*)(payload + off) = st.output_current_x10; off += 2;
+  *(uint16_t*)(payload + off) = st.pump_flags; off += 2;
+
   uint16_t crc = crc16_ccitt_false(payload, off);
   *(uint16_t*)(payload + off) = crc; off += 2;
 
-  uint8_t enc[256];
+  uint8_t enc[300];
   size_t encl = cobs_encode(payload, off, enc);
   Serial.write(enc, encl);
   Serial.write((uint8_t)0x00);

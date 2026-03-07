@@ -1,11 +1,12 @@
 #include "dmbus_pump_node.h"
 #include <Arduino.h>
 #include "pump_vfd_config.h"
-#include "espnow_cmd_proto.h"
+#include "drukmix_bus_v1.h"
+#include "node_identity.h"
 
 void PumpVfdNode::begin() {
   vfd_.begin();
-  link_.begin(WIFI_CHANNEL, PUMP_VFD_PROTO);
+  link_.begin(PUMP_VFD_PROTO);
 
   status_.online = false;
   status_.running = false;
@@ -23,26 +24,37 @@ void PumpVfdNode::handle_rx_() {
   auto rx = link_.pop_rx();
   if (!rx.valid) return;
 
-  if (rx.type == NOW_SET_MAXLPM) {
+  if (rx.msg_type == dmbus::PUMP_SET_MAX_FLOW) {
     if (rx.pump_max_milli_lpm >= 1000) {
       max_milli_lpm_ = rx.pump_max_milli_lpm;
       status_.max_milli_lpm = max_milli_lpm_;
     }
-    link_.send_ack(rx.seq, status_.running ? 1 : 0, status_.fault_code, PUMP_VFD_PROTO);
+
+    link_.send_ack(
+        rx.seq,
+        1,
+        0,
+        PUMP_VFD_PROTO,
+        NODE_ID_PUMP_VFD,
+        0x0001,
+        DEVICE_CLASS_PUMP);
     return;
   }
 
-  if (rx.type == NOW_CMD_FLOW) {
+  if (rx.msg_type == dmbus::PUMP_SET_FLOW) {
     bool ok = true;
 
-    if (rx.flags & 0x02) {
-      ok = stop();
-    } else {
-      ok = set_flow(rx.target_milli_lpm);
-    }
+    if (rx.target_milli_lpm <= 0 || (rx.flags & 0x02)) ok = stop();
+    else ok = set_flow(rx.target_milli_lpm);
 
-    uint16_t err = ok ? status_.fault_code : (uint16_t)1;
-    link_.send_ack(rx.seq, status_.running ? 1 : 0, err, PUMP_VFD_PROTO);
+    link_.send_ack(
+        rx.seq,
+        ok ? 1 : 0,
+        ok ? 0 : 1,
+        PUMP_VFD_PROTO,
+        NODE_ID_PUMP_VFD,
+        0x0001,
+        DEVICE_CLASS_PUMP);
     return;
   }
 }
@@ -62,11 +74,29 @@ void PumpVfdNode::update() {
       status_.faulted = (st.fault_code != 0);
       status_.actual_freq_x10 = st.actual_freq_x10;
       status_.actual_speed_raw = st.actual_speed_raw;
+      status_.output_current_x10 = st.output_current_x10;
     } else {
       status_.online = false;
+      status_.running = false;
+      status_.actual_freq_x10 = 0;
+      status_.actual_speed_raw = 0;
+      status_.output_current_x10 = 0;
     }
 
-    link_.send_status(0, status_.running ? 1 : 0, status_.fault_code, now, PUMP_VFD_PROTO);
+    link_.send_status(
+        0,
+        PUMP_VFD_PROTO,
+        NODE_ID_PUMP_VFD,
+        0x0001,
+        DEVICE_CLASS_PUMP,
+        status_.running,
+        status_.fault_code,
+        status_.target_milli_lpm,
+        status_.max_milli_lpm,
+        status_.cmd_setpoint_raw,
+        status_.actual_freq_x10,
+        status_.actual_speed_raw,
+        status_.output_current_x10);
 
     Serial.print("VFD online=");
     Serial.print(status_.online);
@@ -83,7 +113,9 @@ void PumpVfdNode::update() {
     Serial.print(" actual_freq_x10=");
     Serial.print(status_.actual_freq_x10);
     Serial.print(" speed_raw=");
-    Serial.println(status_.actual_speed_raw);
+    Serial.print(status_.actual_speed_raw);
+    Serial.print(" current_x10=");
+    Serial.println(status_.output_current_x10);
   }
 
   delay(2);
@@ -94,9 +126,7 @@ bool PumpVfdNode::set_flow(int32_t target_milli_lpm) {
   status_.target_milli_lpm = target_milli_lpm;
   status_.max_milli_lpm = max_milli_lpm_;
 
-  if (target_milli_lpm <= 0) {
-    return stop();
-  }
+  if (target_milli_lpm <= 0) return stop();
 
   int32_t pct_x100 = (target_milli_lpm * 10000L) / max_milli_lpm_;
   if (pct_x100 < 0) pct_x100 = 0;
