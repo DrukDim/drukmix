@@ -22,4 +22,6 @@ private:
   int32_t target_milli_lpm_ = 0;
   int32_t max_milli_lpm_ = 10000;
   PumpNodeStatus status_{};
+
+  void handle_rx_();
 };

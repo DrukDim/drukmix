@@ -3,37 +3,54 @@
 #include "pump_vfd_config.h"
 #include "legacy_now_proto.h"
 
-static constexpr uint8_t FLAG_STOP = 0x02;
-
 void PumpVfdNode::begin() {
   vfd_.begin();
   link_.begin(WIFI_CHANNEL, PUMP_VFD_PROTO);
+
+  status_.online = false;
+  status_.running = false;
+  status_.faulted = false;
+  status_.fault_code = 0;
+  status_.target_milli_lpm = 0;
+  status_.actual_milli_lpm = 0;
   status_.max_milli_lpm = max_milli_lpm_;
-  Serial.println("pump_vfd node bootstrap");
+  status_.cmd_setpoint_raw = 0;
+  status_.actual_freq_x10 = 0;
+  status_.actual_speed_raw = 0;
+}
+
+void PumpVfdNode::handle_rx_() {
+  auto rx = link_.pop_rx();
+  if (!rx.valid) return;
+
+  if (rx.type == NOW_SET_MAXLPM) {
+    if (rx.pump_max_milli_lpm >= 1000) {
+      max_milli_lpm_ = rx.pump_max_milli_lpm;
+      status_.max_milli_lpm = max_milli_lpm_;
+    }
+    link_.send_ack(rx.seq, status_.running ? 1 : 0, status_.fault_code, PUMP_VFD_PROTO);
+    return;
+  }
+
+  if (rx.type == NOW_CMD_FLOW) {
+    bool ok = true;
+
+    if (rx.flags & 0x02) {
+      ok = stop();
+    } else {
+      ok = set_flow(rx.target_milli_lpm);
+    }
+
+    uint16_t err = ok ? status_.fault_code : (uint16_t)1;
+    link_.send_ack(rx.seq, status_.running ? 1 : 0, err, PUMP_VFD_PROTO);
+    return;
+  }
 }
 
 void PumpVfdNode::update() {
+  handle_rx_();
+
   uint32_t now = millis();
-
-  auto rx = link_.pop_rx();
-  if (rx.valid) {
-    if (rx.type == NOW_CMD_FLOW) {
-      bool ok = true;
-      if ((rx.flags & FLAG_STOP) || rx.target_milli_lpm <= 0) {
-        ok = stop();
-      } else {
-        ok = set_flow(rx.target_milli_lpm);
-      }
-      link_.send_ack(rx.seq, ok ? 1 : 0, 0, PUMP_VFD_PROTO);
-    } else if (rx.type == NOW_SET_MAXLPM) {
-      if (rx.pump_max_milli_lpm >= 1000) {
-        max_milli_lpm_ = rx.pump_max_milli_lpm;
-        status_.max_milli_lpm = max_milli_lpm_;
-      }
-      link_.send_ack(rx.seq, 1, 0, PUMP_VFD_PROTO);
-    }
-  }
-
   if (now - last_status_ms_ >= STATUS_PERIOD_MS) {
     last_status_ms_ = now;
 
@@ -43,8 +60,8 @@ void PumpVfdNode::update() {
       status_.running = st.running;
       status_.fault_code = st.fault_code;
       status_.faulted = (st.fault_code != 0);
+      status_.actual_freq_x10 = st.actual_freq_x10;
       status_.actual_speed_raw = st.actual_speed_raw;
-      status_.hw_setpoint_raw = st.actual_freq_x10;
     } else {
       status_.online = false;
     }
@@ -57,8 +74,14 @@ void PumpVfdNode::update() {
     Serial.print(status_.running);
     Serial.print(" fault=");
     Serial.print(status_.fault_code);
-    Serial.print(" set_raw=");
-    Serial.print(status_.hw_setpoint_raw);
+    Serial.print(" target=");
+    Serial.print(status_.target_milli_lpm);
+    Serial.print(" max=");
+    Serial.print(status_.max_milli_lpm);
+    Serial.print(" cmd_raw=");
+    Serial.print(status_.cmd_setpoint_raw);
+    Serial.print(" actual_freq_x10=");
+    Serial.print(status_.actual_freq_x10);
     Serial.print(" speed_raw=");
     Serial.println(status_.actual_speed_raw);
   }
@@ -69,6 +92,7 @@ void PumpVfdNode::update() {
 bool PumpVfdNode::set_flow(int32_t target_milli_lpm) {
   target_milli_lpm_ = target_milli_lpm;
   status_.target_milli_lpm = target_milli_lpm;
+  status_.max_milli_lpm = max_milli_lpm_;
 
   if (target_milli_lpm <= 0) {
     return stop();
@@ -78,11 +102,12 @@ bool PumpVfdNode::set_flow(int32_t target_milli_lpm) {
   if (pct_x100 < 0) pct_x100 = 0;
   if (pct_x100 > 10000) pct_x100 = 10000;
 
+  status_.cmd_setpoint_raw = pct_x100;
+
   if (!vfd_.set_frequency_pct_x100((uint16_t)pct_x100)) return false;
   if (!vfd_.set_run_forward()) return false;
 
   status_.running = true;
-  status_.hw_setpoint_raw = pct_x100;
   return true;
 }
 
@@ -90,6 +115,7 @@ bool PumpVfdNode::stop() {
   bool ok = vfd_.set_stop_ramp();
   status_.running = false;
   status_.target_milli_lpm = 0;
+  status_.cmd_setpoint_raw = 0;
   return ok;
 }
 
