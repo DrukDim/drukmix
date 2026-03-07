@@ -1,17 +1,38 @@
 #include "dmbus_pump_node.h"
 #include <Arduino.h>
 #include "pump_vfd_config.h"
+#include "legacy_now_proto.h"
+
+static constexpr uint8_t FLAG_STOP = 0x02;
 
 void PumpVfdNode::begin() {
-  Serial.begin(115200);
-  delay(100);
   vfd_.begin();
+  link_.begin(WIFI_CHANNEL, PUMP_VFD_PROTO);
   status_.max_milli_lpm = max_milli_lpm_;
   Serial.println("pump_vfd node bootstrap");
 }
 
 void PumpVfdNode::update() {
   uint32_t now = millis();
+
+  auto rx = link_.pop_rx();
+  if (rx.valid) {
+    if (rx.type == NOW_CMD_FLOW) {
+      bool ok = true;
+      if ((rx.flags & FLAG_STOP) || rx.target_milli_lpm <= 0) {
+        ok = stop();
+      } else {
+        ok = set_flow(rx.target_milli_lpm);
+      }
+      link_.send_ack(rx.seq, ok ? 1 : 0, 0, PUMP_VFD_PROTO);
+    } else if (rx.type == NOW_SET_MAXLPM) {
+      if (rx.pump_max_milli_lpm >= 1000) {
+        max_milli_lpm_ = rx.pump_max_milli_lpm;
+        status_.max_milli_lpm = max_milli_lpm_;
+      }
+      link_.send_ack(rx.seq, 1, 0, PUMP_VFD_PROTO);
+    }
+  }
 
   if (now - last_status_ms_ >= STATUS_PERIOD_MS) {
     last_status_ms_ = now;
@@ -27,6 +48,8 @@ void PumpVfdNode::update() {
     } else {
       status_.online = false;
     }
+
+    link_.send_status(0, status_.running ? 1 : 0, status_.fault_code, now, PUMP_VFD_PROTO);
 
     Serial.print("VFD online=");
     Serial.print(status_.online);

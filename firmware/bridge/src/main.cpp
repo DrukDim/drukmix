@@ -31,12 +31,13 @@ static void on_now_recv(const uint8_t* mac_addr, const uint8_t* data, int len) {
 }
 
 static void usb_send_status(uint16_t seq_reply) {
-  uint32_t age_ms = (g_now_state.last_seen_ms == 0)
+  const auto* p = find_pump_peer();
+  uint32_t age_ms = (!p)
       ? 0xFFFFFFFFu
-      : (millis() - g_now_state.last_seen_ms);
+      : (millis() - p->last_seen_ms);
 
   UsbStatusPayload st{};
-  st.pump_link = (age_ms < DEVICE_OFFLINE_MS);
+  st.pump_link = (p && age_ms < DEVICE_OFFLINE_MS);
   st.last_seen_div10 = (age_ms == 0xFFFFFFFFu)
       ? 65535
       : (uint16_t)min<uint32_t>(age_ms / 10, 65535);
@@ -121,15 +122,11 @@ void setup() {
   espnow_begin(WIFI_CHANNEL);
 
   if (esp_now_init() != ESP_OK) {
-    Serial.println("ESP-NOW init failed");
     while (true) delay(1000);
   }
 
   esp_now_register_recv_cb(on_now_recv);
 
-  Serial.print("BRIDGE MAC: ");
-  Serial.println(WiFi.macAddress());
-  Serial.println("DrukMix bridge ready");
 }
 
 void loop() {

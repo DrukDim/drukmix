@@ -27,6 +27,8 @@ class BridgeClient:
         if self._ser and self._ser.is_open:
             return
         self._ser = serial.Serial(self.port, self.baudrate, timeout=self.timeout)
+        self._ser.reset_input_buffer()
+        self._ser.reset_output_buffer()
 
     def close(self) -> None:
         if self._ser:
@@ -66,53 +68,71 @@ class BridgeClient:
         if not self._ser:
             raise RuntimeError("serial not open")
 
+        self._ser.reset_input_buffer()
+
         seq = self._next_seq()
         frame = build_frame(msg_type, seq, self._mono_ms(), body)
         self._ser.write(frame)
 
-        raw_cobs = self._read_frame()
-        raw = cobs_decode(raw_cobs)
+        deadline = time.monotonic() + self.timeout
+        last_valid_status = None
 
-        if len(raw) < 8 + 2:
-            raise ValueError("short bridge frame")
+        while time.monotonic() < deadline:
+            raw_cobs = self._read_frame()
+            try:
+                raw = cobs_decode(raw_cobs)
+            except ValueError:
+                continue
 
-        got_crc = struct.unpack_from("<H", raw, len(raw) - 2)[0]
-        calc_crc = crc16_ccitt_false(raw[:-2])
-        if got_crc != calc_crc:
-            raise ValueError("bridge crc mismatch")
+            if len(raw) < 8 + 2:
+                continue
 
-        proto, resp_type, resp_seq, mono_ms = struct.unpack_from("<BBHI", raw, 0)
-        body = raw[8:-2]
+            got_crc = struct.unpack_from("<H", raw, len(raw) - 2)[0]
+            calc_crc = crc16_ccitt_false(raw[:-2])
+            if got_crc != calc_crc:
+                continue
 
-        if resp_type != USB_BRIDGE_STATUS:
-            raise ValueError(f"unexpected response type {resp_type}")
-        if resp_seq not in (0, seq):
-            raise ValueError(f"unexpected response seq {resp_seq}")
+            proto, resp_type, resp_seq, mono_ms = struct.unpack_from("<BBHI", raw, 0)
+            body = raw[8:-2]
 
-        if len(body) < 15:
-            raise ValueError("short bridge status body")
+            if resp_type != USB_BRIDGE_STATUS:
+                continue
 
-        pump_link = body[0]
-        last_seen_div10, last_ack_seq = struct.unpack_from("<HH", body, 1)
-        applied_code = body[5]
-        err_flags, retry_count, send_fail_count = struct.unpack_from("<HHH", body, 6)
-        pump_max_milli_lpm = struct.unpack_from("<i", body, 12)[0]
+            if len(body) < 15:
+                continue
 
-        return {
-            "ok": True,
-            "proto": proto,
-            "resp_type": resp_type,
-            "resp_seq": resp_seq,
-            "mono_ms": mono_ms,
-            "pump_link": bool(pump_link),
-            "last_seen_div10": last_seen_div10,
-            "last_ack_seq": last_ack_seq,
-            "applied_code": applied_code,
-            "err_flags": err_flags,
-            "retry_count": retry_count,
-            "send_fail_count": send_fail_count,
-            "pump_max_milli_lpm": pump_max_milli_lpm,
-        }
+            pump_link = body[0]
+            last_seen_div10, last_ack_seq = struct.unpack_from("<HH", body, 1)
+            applied_code = body[5]
+            err_flags, retry_count, send_fail_count = struct.unpack_from("<HHH", body, 6)
+            pump_max_milli_lpm = struct.unpack_from("<i", body, 12)[0]
+
+            status = {
+                "ok": True,
+                "proto": proto,
+                "resp_type": resp_type,
+                "resp_seq": resp_seq,
+                "mono_ms": mono_ms,
+                "pump_link": bool(pump_link),
+                "last_seen_div10": last_seen_div10,
+                "last_ack_seq": last_ack_seq,
+                "applied_code": applied_code,
+                "err_flags": err_flags,
+                "retry_count": retry_count,
+                "send_fail_count": send_fail_count,
+                "pump_max_milli_lpm": pump_max_milli_lpm,
+            }
+
+            if resp_seq == seq:
+                return status
+
+            if resp_seq == 0:
+                last_valid_status = status
+
+        if last_valid_status is not None:
+            return last_valid_status
+
+        raise TimeoutError("no valid bridge response")
 
     def ping(self) -> dict:
         return self._request(USB_PING, b"")

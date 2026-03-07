@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include "pump_node_iface.h"
 #include "vfd_m980_driver.h"
+#include "legacy_now_link.h"
 
 class PumpVfdNode : public PumpNodeIface {
 public:
@@ -15,8 +16,9 @@ public:
 
 private:
   VfdM980Driver vfd_;
-  uint32_t last_status_ms_ = 0;
+  LegacyNowLink link_;
 
+  uint32_t last_status_ms_ = 0;
   int32_t target_milli_lpm_ = 0;
   int32_t max_milli_lpm_ = 10000;
   PumpNodeStatus status_{};

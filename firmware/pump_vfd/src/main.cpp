@@ -35,5 +35,28 @@ void setup() {
 }
 
 void loop() {
+  static uint32_t last_hello = 0;
+  static uint32_t uid_lo = 0;
+  static uint32_t uid_hi = 0;
+
+  if (uid_lo == 0 && uid_hi == 0) {
+    espnow_get_local_uid(&uid_lo, &uid_hi);
+  }
+
+  uint32_t now = millis();
+  if (now - last_hello >= 1000) {
+    last_hello = now;
+    espnow_send_hello(
+        PUMP_VFD_PROTO,
+        NODE_ID_PUMP_VFD,
+        DEVICE_CLASS_PUMP,
+        DRIVER_TYPE_PUMP_VFD,
+        FW_VER_MAJOR,
+        FW_VER_MINOR,
+        FW_VER_PATCH,
+        uid_lo,
+        uid_hi);
+  }
+
   g_node.update();
 }
