@@ -6,6 +6,7 @@
 #include "cobs_crc.h"
 #include "espnow_link.h"
 #include "peer_registry.h"
+#include "usb_link.h"
 
 static EspNowState g_now_state{};
 static const PeerEntry* g_pump_peer = nullptr;
@@ -15,55 +16,35 @@ static int32_t  g_target_milli_lpm = 0;
 static uint8_t  g_flags = 0;
 static int32_t  g_pump_max_milli_lpm = 10000;
 
-static uint8_t rxbuf[256];
-static size_t  rxlen = 0;
+static UsbLink g_usb;
 
 static void on_now_recv(const uint8_t* mac_addr, const uint8_t* data, int len) {
   espnow_on_recv(mac_addr, data, len, BRIDGE_PROTO, &g_now_state);
 }
 
 static void usb_send_status(uint16_t seq_reply) {
-  uint8_t payload[128];
-  size_t off = 0;
-
-  UsbHdr hdr{BRIDGE_PROTO, USB_BRIDGE_STATUS, seq_reply, millis()};
-  memcpy(payload + off, &hdr, sizeof(hdr));
-  off += sizeof(hdr);
-
   uint32_t age_ms = (g_now_state.last_seen_ms == 0) ? 0xFFFFFFFFu : (millis() - g_now_state.last_seen_ms);
-  uint8_t pump_link = (age_ms < DEVICE_OFFLINE_MS) ? 1 : 0;
-  uint16_t last_seen_div10 = (age_ms == 0xFFFFFFFFu) ? 65535 : (uint16_t)min<uint32_t>(age_ms / 10, 65535);
-
-  payload[off++] = pump_link;
-  *(uint16_t*)(payload + off) = last_seen_div10; off += 2;
-  *(uint16_t*)(payload + off) = g_now_state.last_ack_seq; off += 2;
-  payload[off++] = g_now_state.last_applied;
-  *(uint16_t*)(payload + off) = g_now_state.last_err; off += 2;
-  *(uint16_t*)(payload + off) = g_now_state.retry_count; off += 2;
-  *(uint16_t*)(payload + off) = g_now_state.send_fail_count; off += 2;
-  *(int32_t*)(payload + off) = g_pump_max_milli_lpm; off += 4;
-
-  uint16_t crc = crc16_ccitt_false(payload, off);
-  *(uint16_t*)(payload + off) = crc; off += 2;
-
-  uint8_t enc[256];
-  size_t encl = cobs_encode(payload, off, enc);
-  Serial.write(enc, encl);
-  Serial.write((uint8_t)0x00);
+  UsbStatusPayload st{};
+  st.pump_link = (age_ms < DEVICE_OFFLINE_MS);
+  st.last_seen_div10 = (age_ms == 0xFFFFFFFFu) ? 65535 : (uint16_t)min<uint32_t>(age_ms / 10, 65535);
+  st.last_ack_seq = g_now_state.last_ack_seq;
+  st.applied_code = g_now_state.last_applied;
+  st.err_flags = g_now_state.last_err;
+  st.retry_count = g_now_state.retry_count;
+  st.send_fail_count = g_now_state.send_fail_count;
+  st.pump_max_milli_lpm = g_pump_max_milli_lpm;
+  g_usb.send_status(BRIDGE_PROTO, seq_reply, st);
 }
 
 static void handle_usb_packet(const uint8_t* pkt, size_t len) {
-  if (len < sizeof(UsbHdr) + 2) return;
+  UsbHdr hdr{};
+  const uint8_t* body = nullptr;
+  size_t body_len = 0;
 
-  uint16_t got = *(const uint16_t*)(pkt + len - 2);
-  uint16_t calc = crc16_ccitt_false(pkt, len - 2);
-  if (got != calc) return;
+  if (!UsbLink::parse_packet(pkt, len, &hdr, &body, &body_len)) return;
+  if (hdr.proto != BRIDGE_PROTO) return;
 
-  const UsbHdr* h = (const UsbHdr*)pkt;
-  if (h->proto != BRIDGE_PROTO) return;
-
-  const uint8_t* body = pkt + sizeof(UsbHdr);
-  size_t body_len = len - sizeof(UsbHdr) - 2;
+  const UsbHdr* h = &hdr;
 
   if (h->type == USB_SET_FLOW) {
     if (body_len < 5) return;
@@ -87,27 +68,8 @@ static void handle_usb_packet(const uint8_t* pkt, size_t len) {
   }
 }
 
-static void usb_poll() {
-  while (Serial.available()) {
-    uint8_t b = (uint8_t)Serial.read();
-    if (b == 0x00) {
-      if (rxlen > 0) {
-        uint8_t dec[256];
-        size_t decl = 0;
-        if (cobs_decode(rxbuf, rxlen, dec, &decl)) {
-          handle_usb_packet(dec, decl);
-        }
-      }
-      rxlen = 0;
-    } else {
-      if (rxlen < sizeof(rxbuf)) rxbuf[rxlen++] = b;
-      else rxlen = 0;
-    }
-  }
-}
-
 void setup() {
-  Serial.begin(SERIAL_BAUD);
+  g_usb.begin(SERIAL_BAUD);
   delay(50);
 
   g_pump_peer = peer_get_pump_main();
@@ -132,7 +94,11 @@ void setup() {
 }
 
 void loop() {
-  usb_poll();
+  uint8_t pkt[256];
+  size_t pkt_len = 0;
+  if (g_usb.poll_packet(pkt, sizeof(pkt), &pkt_len)) {
+    handle_usb_packet(pkt, pkt_len);
+  }
 
   if (g_now_state.wait_ack && g_now_state.retry_left > 0 && (millis() - g_now_state.last_send_ms) > ACK_TIMEOUT_MS) {
     g_now_state.retry_left--;
