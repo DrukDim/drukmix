@@ -1,0 +1,44 @@
+#pragma once
+#include <stdint.h>
+#include "bridge_proto.h"
+
+struct EspNowState {
+  uint8_t  last_applied = 0;
+  uint16_t last_err = 0;
+  uint16_t last_ack_seq = 0;
+  uint32_t last_seen_ms = 0;
+
+  bool     wait_ack = false;
+  uint8_t  retry_left = 0;
+  uint32_t last_send_ms = 0;
+
+  uint16_t retry_count = 0;
+  uint16_t send_fail_count = 0;
+};
+
+void espnow_begin(int wifi_channel);
+void espnow_add_peer(const uint8_t mac[6]);
+
+void espnow_send_flow(
+    const uint8_t mac[6],
+    uint8_t proto,
+    uint16_t seq,
+    int32_t target_milli_lpm,
+    uint8_t flags,
+    uint32_t now_ms,
+    EspNowState* st);
+
+void espnow_send_maxlpm(
+    const uint8_t mac[6],
+    uint8_t proto,
+    uint16_t seq,
+    int32_t pump_max_milli_lpm,
+    uint32_t now_ms,
+    EspNowState* st);
+
+void espnow_on_recv(
+    const uint8_t* mac_addr,
+    const uint8_t* data,
+    int len,
+    uint8_t proto,
+    EspNowState* st);
