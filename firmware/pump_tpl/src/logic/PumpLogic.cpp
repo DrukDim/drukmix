@@ -3,8 +3,8 @@
 #include "../drivers/EspNowProto.h"
 #include <WiFi.h>
 
-using namespace DrukMixPump;
-using namespace DrukMixPump::Drivers;
+using namespace PumpTpl;
+using namespace PumpTpl::Drivers;
 
 void Logic::PumpLogic::begin() {
   Serial.begin(115200);

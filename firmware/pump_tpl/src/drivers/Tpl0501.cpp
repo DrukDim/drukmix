@@ -1,6 +1,6 @@
 #include "Tpl0501.h"
 
-using namespace DrukMixPump::Drivers;
+using namespace PumpTpl::Drivers;
 
 Tpl0501::Tpl0501(int cs, int sclk, int mosi, uint32_t hz)
 : cs_(cs), sclk_(sclk), mosi_(mosi), hz_(hz), spi_(VSPI), last_(0) {}

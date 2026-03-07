@@ -2,7 +2,7 @@
 #include <Arduino.h>
 #include <SPI.h>
 
-namespace DrukMixPump::Drivers {
+namespace PumpTpl::Drivers {
 
   class Tpl0501 {
    public:

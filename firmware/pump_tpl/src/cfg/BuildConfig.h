@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
 
-namespace DrukMixPump::Cfg {
+namespace PumpTpl::Cfg {
   static constexpr uint8_t  PROTO = 1;
   static constexpr int      WIFI_CHANNEL = 6;
 

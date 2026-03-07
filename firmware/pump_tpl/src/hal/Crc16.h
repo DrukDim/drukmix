@@ -2,7 +2,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace DrukMixPump::Hal {
+namespace PumpTpl::Hal {
   inline uint16_t crc16_ccitt_false(const uint8_t* data, size_t len) {
     uint16_t crc = 0xFFFF;
     for (size_t i = 0; i < len; i++) {

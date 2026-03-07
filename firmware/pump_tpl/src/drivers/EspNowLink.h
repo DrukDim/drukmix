@@ -2,7 +2,7 @@
 #include <cstdint>
 #include <esp_now.h>
 
-namespace DrukMixPump::Drivers {
+namespace PumpTpl::Drivers {
 
   struct RxCmd {
     bool valid = false;

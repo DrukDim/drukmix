@@ -5,7 +5,7 @@
 #include <esp_wifi.h>
 #include <esp_now.h>
 
-using namespace DrukMixPump;
+using namespace PumpTpl;
 
 Drivers::EspNowLink* Drivers::EspNowLink::self_ = nullptr;
 

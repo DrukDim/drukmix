@@ -5,7 +5,7 @@
 #include "../drivers/Tpl0501.h"
 #include "../drivers/EspNowLink.h"
 
-namespace DrukMixPump::Logic {
+namespace PumpTpl::Logic {
 
   class PumpLogic {
    public:

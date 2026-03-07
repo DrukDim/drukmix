@@ -1,6 +1,6 @@
 #pragma once
 
-namespace DrukMixPump::Pins {
+namespace PumpTpl::Pins {
   // TPL0501 pins
   static constexpr int CS   = 16;
   static constexpr int MOSI = 17;

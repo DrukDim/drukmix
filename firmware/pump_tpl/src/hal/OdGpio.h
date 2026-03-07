@@ -1,7 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
-namespace DrukMixPump::Hal {
+namespace PumpTpl::Hal {
   inline void od_on(int pin) {
     pinMode(pin, OUTPUT);
     digitalWrite(pin, LOW);
