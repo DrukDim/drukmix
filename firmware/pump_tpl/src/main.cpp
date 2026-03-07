@@ -1,12 +1,12 @@
 #include <Arduino.h>
-#include "logic/PumpLogic.h"
+#include "pump_tpl_node.h"
 
-PumpTpl::Logic::PumpLogic g_pump;
+static PumpTplNode g_node;
 
 void setup() {
-  g_pump.begin();
+  g_node.begin();
 }
 
 void loop() {
-  g_pump.update();
+  g_node.update();
 }

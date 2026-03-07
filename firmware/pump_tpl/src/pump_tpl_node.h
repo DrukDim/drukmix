@@ -1,9 +1,8 @@
 #pragma once
-#include <stdint.h>
 #include "pump_node_iface.h"
-#include "vfd_m980_driver.h"
+#include "logic/PumpLogic.h"
 
-class PumpVfdNode : public PumpNodeIface {
+class PumpTplNode : public PumpNodeIface {
 public:
   void begin() override;
   void update() override;
@@ -14,10 +13,6 @@ public:
   bool get_status(PumpNodeStatus* st) override;
 
 private:
-  VfdM980Driver vfd_;
-  uint32_t last_status_ms_ = 0;
-
-  int32_t target_milli_lpm_ = 0;
-  int32_t max_milli_lpm_ = 10000;
+  PumpTpl::Logic::PumpLogic logic_;
   PumpNodeStatus status_{};
 };
