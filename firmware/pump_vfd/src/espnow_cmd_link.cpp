@@ -1,14 +1,14 @@
-#include "legacy_now_link.h"
+#include "espnow_cmd_link.h"
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_now.h>
 #include <esp_wifi.h>
-#include "legacy_now_proto.h"
+#include "espnow_cmd_proto.h"
 #include "drukmix_bus_util.h"
 
-LegacyNowLink* LegacyNowLink::self_ = nullptr;
+EspNowCmdLink* EspNowCmdLink::self_ = nullptr;
 
-void LegacyNowLink::begin(int wifi_channel, uint8_t proto) {
+void EspNowCmdLink::begin(int wifi_channel, uint8_t proto) {
   proto_ = proto;
   self_ = this;
 
@@ -19,16 +19,16 @@ void LegacyNowLink::begin(int wifi_channel, uint8_t proto) {
   if (esp_now_init() != ESP_OK) {
     return;
   }
-  esp_now_register_recv_cb(&LegacyNowLink::on_recv_thunk_);
+  esp_now_register_recv_cb(&EspNowCmdLink::on_recv_thunk_);
 }
 
-LegacyRxCmd LegacyNowLink::pop_rx() {
-  LegacyRxCmd out = rx_;
+EspNowCmd EspNowCmdLink::pop_rx() {
+  EspNowCmd out = rx_;
   rx_.valid = false;
   return out;
 }
 
-void LegacyNowLink::ensure_peer_(const uint8_t* mac) {
+void EspNowCmdLink::ensure_peer_(const uint8_t* mac) {
   if (peer_known_ && memcmp(mac, peer_mac_, 6) == 0) return;
 
   memcpy(peer_mac_, mac, 6);
@@ -44,11 +44,11 @@ void LegacyNowLink::ensure_peer_(const uint8_t* mac) {
   }
 }
 
-void LegacyNowLink::on_recv_thunk_(const uint8_t* mac_addr, const uint8_t* data, int len) {
+void EspNowCmdLink::on_recv_thunk_(const uint8_t* mac_addr, const uint8_t* data, int len) {
   if (self_) self_->on_recv_(mac_addr, data, len);
 }
 
-void LegacyNowLink::on_recv_(const uint8_t* mac_addr, const uint8_t* data, int len) {
+void EspNowCmdLink::on_recv_(const uint8_t* mac_addr, const uint8_t* data, int len) {
   if (!mac_addr || !data) return;
   if (len < (int)sizeof(NowHdr) + 2) return;
 
@@ -77,7 +77,7 @@ void LegacyNowLink::on_recv_(const uint8_t* mac_addr, const uint8_t* data, int l
   }
 }
 
-void LegacyNowLink::send_ack(uint16_t seq, uint8_t applied_code, uint16_t err_flags, uint8_t proto) {
+void EspNowCmdLink::send_ack(uint16_t seq, uint8_t applied_code, uint16_t err_flags, uint8_t proto) {
   if (!peer_known_) return;
 
   NowAck pkt{};
@@ -88,7 +88,7 @@ void LegacyNowLink::send_ack(uint16_t seq, uint8_t applied_code, uint16_t err_fl
   esp_now_send(peer_mac_, (const uint8_t*)&pkt, sizeof(pkt));
 }
 
-void LegacyNowLink::send_status(uint16_t seq, uint8_t applied_code, uint16_t err_flags, uint32_t uptime_ms, uint8_t proto) {
+void EspNowCmdLink::send_status(uint16_t seq, uint8_t applied_code, uint16_t err_flags, uint32_t uptime_ms, uint8_t proto) {
   if (!peer_known_) return;
 
   NowStatus pkt{};

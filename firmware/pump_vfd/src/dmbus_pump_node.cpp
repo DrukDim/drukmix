@@ -1,7 +1,7 @@
 #include "dmbus_pump_node.h"
 #include <Arduino.h>
 #include "pump_vfd_config.h"
-#include "legacy_now_proto.h"
+#include "espnow_cmd_proto.h"
 
 void PumpVfdNode::begin() {
   vfd_.begin();
