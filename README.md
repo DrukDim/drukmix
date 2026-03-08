@@ -103,9 +103,23 @@ Semantics:
 There is one canonical runtime pump status type:
 - `PumpStatus`
 
+Canonical `PumpStatus` contains only backend-independent runtime fields:
+- `StatusCommon c`
+- `target_milli_lpm`
+- `actual_milli_lpm`
+- `max_milli_lpm`
+- `hw_setpoint_raw`
+- `link_flags`
+- `pump_flags`
+
 Versioned duplicates such as `PumpStatusV1`, `PumpStatusV2`, etc. should not be introduced unless there is a hard compatibility requirement.
 
 The status model must remain suitable for more than one backend. It must not become permanently VFD-specific.
+
+It must not contain backend-only telemetry such as:
+- VFD frequency
+- VFD motor speed
+- VFD output current
 
 ## Manual / local mode rule
 
@@ -149,6 +163,141 @@ Do not:
 - move print business logic into the bridge
 - let transport details dictate the whole architecture
 - make the bus permanently specific to only one pump backend
+
+## Canonical pump command semantics
+
+The canonical host-visible pump command behavior is:
+
+### `PUMP_SET_FLOW`
+Purpose:
+- request a pump flow target in `milli_lpm`
+
+Rules:
+- `target_milli_lpm > 0` means normal remote pumping request
+- `target_milli_lpm <= 0` is not the preferred hard-stop command; it may be treated as a stop-equivalent by a backend, but host orchestration should prefer explicit stop semantics
+- command acceptance must depend on current node state, hardware readiness, and local/manual override state
+- backend-specific low-level actuation is private to the node
+
+ACK expectations:
+- `ACK_OK` when the command is accepted for execution
+- `ACK_ERROR` when the command is rejected due to local/manual mode, hardware not ready, invalid parameter, or backend failure
+- `detail` should carry backend-specific reason when useful
+
+### `PUMP_SET_MAX_FLOW`
+Purpose:
+- configure the current maximum allowed pump flow envelope for the active backend
+
+Rules:
+- this is a configuration/control bound, not a direct run command
+- it must be backend-independent at the interface level even if internal implementation differs
+
+### `OP_STOP`
+Purpose:
+- explicit unconditional remote-controlled stop request
+
+Rules:
+- this is the canonical stop command
+- host-side print logic should prefer `OP_STOP` over overloading `PUMP_SET_FLOW=0`
+- node must apply the safest supported stop behavior for the backend
+- stop behavior may be ramp stop, controlled stop, or immediate safe stop depending on hardware/backend policy
+
+### `OP_RESET_FAULT`
+Purpose:
+- request fault reset when the backend supports it
+
+Rules:
+- acceptance depends on backend capability and current state
+- unsupported backends should reject with normalized ACK semantics
+
+## Manual / local override semantics
+
+Manual or local override must be treated as a first-class control condition.
+
+### Required behavior
+If manual/local mode is active:
+- remote flow/run commands must not be executed as normal run commands
+- node must report rejection through ACK
+- status must clearly show manual/local condition
+- host layer must treat the pump as not remotely controllable until manual/local mode clears
+
+### ACK behavior under manual/local override
+Recommended normalized behavior:
+- `status = ACK_ERROR`
+- `err_code = ERR_BAD_STATE` or a dedicated future normalized code if added later
+- `detail = backend-specific reason`
+- pump fault/status model may also expose `FAULT_PUMP_MANUAL_MODE` where appropriate
+
+### Status behavior under manual/local override
+Manual/local state must be visible through the canonical status model using flags rather than backend-specific transport hacks:
+- `PUMP_FLAG_MANUAL_MODE`
+- `PUMP_FLAG_REMOTE_MODE`
+
+Only one control authority should be considered active at a time.
+
+## Layer responsibility matrix
+
+### Pump node responsibilities
+The pump node is responsible for:
+- backend I/O
+- hardware state validation
+- manual/local input evaluation
+- safe command application
+- generation of canonical ACK
+- generation of canonical `PumpStatus`
+
+The pump node is not responsible for:
+- print orchestration
+- flush planning
+- long host-side state machines
+- UI policy
+
+### Bridge responsibilities
+The bridge is responsible for:
+- host transport termination
+- ESP-NOW forwarding
+- retry / timeout handling
+- exposing bridge-visible status to the host
+
+The bridge is not responsible for:
+- print business logic
+- backend-specific pump policy
+- flush or prime sequencing
+- interpreting print intent
+
+### Agent responsibilities
+The agent is responsible for:
+- print-linked pump orchestration
+- synchronization with Klipper state
+- flush / prime sequencing
+- unconditional stop policy
+- minimum-flow cutoff policy
+- watchdog policy above transport level
+- exposing a clean model to Moonraker / Mainsail
+
+## Agent state machine goals
+
+The host-side agent should evolve toward a small explicit state machine.
+
+Suggested high-level states:
+- `DISCONNECTED`
+- `IDLE`
+- `ARMED`
+- `RUNNING`
+- `FLUSHING`
+- `STOPPING`
+- `FAULT`
+- `MANUAL_LOCKOUT`
+
+Required transitions should cover:
+- print start / print stop
+- commanded flow becoming positive
+- commanded flow dropping below minimum threshold
+- manual/local override appearing or clearing
+- communication loss
+- backend fault
+- unconditional emergency stop
+
+The agent should become the only place where print-time business logic is coordinated.
 
 ## Immediate next milestone
 
