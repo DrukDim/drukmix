@@ -485,12 +485,34 @@ Rule:
 - [x] Підтверджено правильний deployment sequence для `pump_vfd`: `rebuild -> export -> flash -> live verify`
 - [x] Уточнити правильну семантику `running` для M980; live-підтверджено: `running = (freq>0) or (speed!=0) or (current>0)`, а `RUN_STATE` не вважати ознакою фізичного руху
 - [ ] Дочистити bridge ACK/retry semantics
-- [ ] Перевірити та прибрати дублювання reset command/retry path
+- [x] Перевірити та прибрати дублювання reset command/retry path; live-підтверджено isolated test: один `OP_RESET_FAULT`, один ACK, без повторної resend-посилки
 - [ ] Після стабілізації прибрати зайвий debug/test code
 - [ ] Зробити clean architecture pass і прибрати застарілі/суперечливі baseline notes
 
 
 ### Verified M980 live behavior
+
+### Verified bridge reset propagation
+
+Підтверджено live end-to-end:
+
+- isolated test виконувати тільки при зупиненому `drukmix.service`
+- monitor на pump node показав один `OP_RESET_FAULT`
+- `last_ack_seq` на bridge змінився рівно на один для reset-команди
+- після `sleep 3` host-side `ping` показує:
+  - `pump_fault_code = 0`
+  - `pump_state = 3`
+  - `pump_running = false`
+
+Висновок:
+- reset fault зараз підтверджений не тільки локально на `pump_vfd`, а й наскрізно через `bridge -> esp-now -> pump_vfd -> status back to host`
+- для перевірки reset-path правильний тест тільки isolated:
+  - `sudo systemctl stop drukmix.service`
+  - `ping`
+  - `reset-fault`
+  - `sleep 3`
+  - `ping`
+
 
 Підтверджено live на стенді:
 
