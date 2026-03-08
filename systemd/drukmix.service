@@ -1,27 +1,18 @@
 [Unit]
 Description=DrukMix Moonraker Agent
-After=network-online.target
+After=network-online.target moonraker.service
 Wants=network-online.target
+Requires=moonraker.service
 
 [Service]
 Type=simple
 User=dan
-
-# Шлях до cfg (агент читає його при старті і при reload по mtime)
+WorkingDirectory=/home/dan/drukmix
 Environment=DRUKMIX_CONFIG=/home/dan/printer_data/config/drukmix.cfg
-
-# Щоб Python не буферив stdout/stderr (краще видно в journal)
-Environment=PYTHONUNBUFFERED=1
-
-WorkingDirectory=/home/dan
 ExecStart=/usr/bin/python3 /home/dan/drukmix/drukmix_agent.py
-
 Restart=always
-RestartSec=0.5
-
-# Мінімальна “гігієна” без ломання serial доступу
-NoNewPrivileges=true
-PrivateTmp=true
+RestartSec=2
+Nice=5
 
 [Install]
 WantedBy=multi-user.target
