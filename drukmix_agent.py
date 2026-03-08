@@ -4,45 +4,242 @@ import json
 import os
 import time
 import fcntl
+import logging
+import dataclasses
+from logging.handlers import RotatingFileHandler
+from typing import Dict, Optional, Tuple
 
-
-from agent.runtime.transport import (
+from agent_config import (
+    Cfg,
+    clamp,
+    load_config,
+    read_filament_diameter_from_printer_cfg,
+    liters_per_mm_from_diameter_mm,
+)
+from agent_transport import (
     FLAG_AUTO,
     FLAG_REV,
     FLAG_STOP,
     BridgeSerial,
 )
-from agent.runtime.config import (
-    Cfg,
-    clamp,
-    liters_per_mm_from_diameter_mm,
-    load_config,
-    read_filament_diameter_from_printer_cfg,
-)
-from agent.runtime.state import (
-    FlushState,
-    KlipperState,
-    LinkState,
-    Overrides,
-)
-from agent.runtime.logging_setup import setup_logger
-from agent.runtime.moonraker import MoonrakerClient
-from agent.runtime.helpers import (
-    decode_mode,
-    apply_status,
-    is_printing,
-    parse_remote_call,
-)
-from agent.runtime.orchestrator import (
-    expected_code,
-    compute_desired_flow,
-)
-from agent.runtime.control import (
-    maybe_respond,
-    pause_with_popup,
-    burst_send,
-    confirm_applied,
-)
+from agent_moonraker import MoonrakerClient
+
+
+# ----------------- runtime state -----------------
+@dataclasses.dataclass
+class KlipperState:
+    print_state: str = "unknown"
+    idle_state: str = "unknown"
+    is_paused: bool = False
+    klippy_state: str = "unknown"
+    extrude_factor: float = 1.0
+    live_extruder_velocity: float = 0.0
+
+
+@dataclasses.dataclass
+class LinkState:
+    last_bridge_frame_t: float = 0.0
+    pump_link: int = 0
+    age_ms: Optional[int] = None
+    last_code: int = 0
+    err_flags: int = 0
+
+
+@dataclasses.dataclass
+class FlushState:
+    active: bool = False
+    lpm: float = 0.0
+    until_t: float = 0.0
+
+
+@dataclasses.dataclass
+class Overrides:
+    gain: float | None = None
+    log_level: str | None = None
+
+
+# ----------------- logging setup -----------------
+def setup_logger(log_file: str) -> logging.Logger:
+    lg = logging.getLogger("drukmix")
+    lg.setLevel(logging.INFO)
+    lg.handlers.clear()
+
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)
+    fh = RotatingFileHandler(log_file, maxBytes=5_000_000, backupCount=5)
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    fh.setFormatter(fmt)
+    lg.addHandler(fh)
+
+    sh = logging.StreamHandler()
+    sh.setFormatter(fmt)
+    lg.addHandler(sh)
+    return lg
+
+
+# ----------------- logic helpers -----------------
+EF_MANUAL_FWD = 0x0010
+EF_MANUAL_REV = 0x0020
+EF_AUTO_ALLOWED = 0x0040
+EF_AUTO_ACTIVE = 0x0080
+EF_DIR_ASSERTED = 0x0100
+EF_WIPER_TPL = 0x0200
+
+
+def apply_status(ks, st: Dict[str, object]) -> None:
+    if "print_stats" in st and "state" in st["print_stats"]:
+        ks.print_state = str(st["print_stats"]["state"])
+    if "idle_timeout" in st and "state" in st["idle_timeout"]:
+        ks.idle_state = str(st["idle_timeout"]["state"])
+    if "pause_resume" in st and "is_paused" in st["pause_resume"]:
+        ks.is_paused = bool(st["pause_resume"]["is_paused"])
+
+    if "webhooks" in st and "state" in st["webhooks"]:
+        ks.klippy_state = str(st["webhooks"]["state"])
+    if "gcode_move" in st and "extrude_factor" in st["gcode_move"]:
+        try:
+            ks.extrude_factor = float(st["gcode_move"]["extrude_factor"])
+        except Exception:
+            ks.extrude_factor = 1.0
+    if "motion_report" in st and "live_extruder_velocity" in st["motion_report"]:
+        try:
+            ks.live_extruder_velocity = float(st["motion_report"]["live_extruder_velocity"])
+        except Exception:
+            ks.live_extruder_velocity = 0.0
+
+
+def is_printing(ks) -> bool:
+    ps = ks.print_state.lower()
+    it = ks.idle_state.lower()
+    return (ps == "printing") or (it == "printing")
+
+
+def parse_remote_call(msg: dict) -> Optional[Tuple[str, dict]]:
+    m = msg.get("method")
+    if not isinstance(m, str) or not m.startswith("drukmix_"):
+        return None
+    p = msg.get("params") or {}
+    return (m, p) if isinstance(p, dict) else (m, {})
+
+
+def decode_mode(err_flags: int) -> str:
+    if err_flags & EF_MANUAL_FWD:
+        return "MANUAL_FWD"
+    if err_flags & EF_MANUAL_REV:
+        return "MANUAL_REV"
+    return "AUTO"
+
+
+# ----------------- orchestration helpers -----------------
+def expected_code(lpm: float, max_lpm: float) -> int:
+    if max_lpm <= 0:
+        return 0
+    c = int(round((clamp(lpm, 0.0, max_lpm) / max_lpm) * 255.0))
+    return int(clamp(c, 0, 255))
+
+
+def compute_desired_flow(
+    *,
+    flush_active: bool,
+    flush_lpm: float,
+    active_motion: bool,
+    mode: str,
+    live_extruder_velocity: float,
+    extrude_factor: float,
+    liters_per_mm: float,
+    max_lpm: float,
+    gain: float,
+    retract_deadband_mm_s: float,
+    retract_gain: float,
+    min_run_lpm: float,
+):
+    if flush_active:
+        desired_lpm = clamp(flush_lpm, 0.0, max_lpm)
+        flags = FLAG_AUTO if desired_lpm > 0.0 else FLAG_STOP
+        return desired_lpm, flags
+
+    if (not active_motion) or (mode != "AUTO"):
+        return 0.0, FLAG_STOP
+
+    vel = float(live_extruder_velocity)
+    dead = max(0.0, retract_deadband_mm_s)
+    is_rev = vel < -dead
+
+    speed = abs(vel)
+    lpm = speed * liters_per_mm * 60.0
+    lpm *= max(0.0, float(extrude_factor))
+    lpm *= max(0.0, (retract_gain if is_rev else gain))
+    lpm = clamp(lpm, 0.0, max_lpm)
+
+    if not is_rev:
+        if 0.0 < lpm < min_run_lpm:
+            lpm = min_run_lpm
+
+    desired_lpm = lpm
+    if desired_lpm <= 0.0:
+        flags = FLAG_STOP
+    else:
+        flags = FLAG_AUTO | (FLAG_REV if is_rev else 0)
+
+    return desired_lpm, flags
+
+
+# ----------------- control helpers -----------------
+async def maybe_respond(mr, ui_notify: bool, last_state_msg_t: float, level: str, msg: str, min_interval_s: float = 0.4):
+    if not ui_notify:
+        return last_state_msg_t
+    now = time.monotonic()
+    if now - last_state_msg_t < min_interval_s:
+        return last_state_msg_t
+    try:
+        await mr.respond(level, msg)
+    except Exception:
+        pass
+    return now
+
+
+async def pause_with_popup(mr, ks, pause_reason: str | None, reason: str, ui_notify: bool, last_state_msg_t: float):
+    if ks.is_paused:
+        return pause_reason, last_state_msg_t
+    if pause_reason == reason:
+        return pause_reason, last_state_msg_t
+    pause_reason = reason
+    try:
+        await mr.pause_print()
+    except Exception:
+        pass
+    last_state_msg_t = await maybe_respond(mr, ui_notify, last_state_msg_t, "error", reason, min_interval_s=0.0)
+    return pause_reason, last_state_msg_t
+
+
+async def burst_send(bridge, lpm: float, flags: int, burst_count: int, burst_interval_ms: int):
+    count = max(1, int(burst_count))
+    interval = max(0.0, float(burst_interval_ms)) / 1000.0
+    for _ in range(count):
+        try:
+            bridge.send_flow(lpm, flags)
+        except Exception:
+            pass
+        if interval > 0:
+            await asyncio.sleep(interval)
+
+
+async def confirm_applied(status_event, ls, want_code: int, stop: bool, timeout_s: float, tolerance_code: int):
+    deadline = time.monotonic() + max(0.05, timeout_s)
+    tol = max(0, min(int(tolerance_code), 50))
+    while time.monotonic() < deadline:
+        if stop:
+            if ls.last_code == 0:
+                return True
+        else:
+            if abs(ls.last_code - want_code) <= tol:
+                return True
+        status_event.clear()
+        try:
+            await asyncio.wait_for(status_event.wait(), timeout=0.10)
+        except asyncio.TimeoutError:
+            pass
+    return False
+
 
 # ----------------- agent main -----------------
 
@@ -544,3 +741,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

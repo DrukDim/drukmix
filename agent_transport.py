@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 
 import serial
 
-from agent.runtime.config import clamp
+from agent_config import clamp
 
 PROTO = 1
 USB_SET_FLOW = 1
