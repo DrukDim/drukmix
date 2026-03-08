@@ -189,67 +189,14 @@ bool PumpVfdNode::stop() {
 }
 
 bool PumpVfdNode::reset_fault() {
-  VfdStatus st{};
-
-  auto dump = [&](const char* tag) -> bool {
-    if (vfd_.poll_status(&st)) {
-      Serial.print("[RST] ");
-      Serial.print(tag);
-      Serial.print(" online=");
-      Serial.print(st.online);
-      Serial.print(" running=");
-      Serial.print(st.running);
-      Serial.print(" fault=");
-      Serial.print(st.fault_code);
-      Serial.print(" freq_x10=");
-      Serial.print(st.actual_freq_x10);
-      Serial.print(" speed=");
-      Serial.print(st.actual_speed_raw);
-      Serial.print(" current_x10=");
-      Serial.println(st.output_current_x10);
-
-      status_.online = true;
-      status_.fault_code = st.fault_code;
-      status_.faulted = (st.fault_code != 0);
-      status_.running = status_.faulted ? false : st.running;
-      return true;
-    }
-
-    Serial.print("[RST] ");
-    Serial.print(tag);
-    Serial.println(" poll_fail");
-    status_.online = false;
-    status_.running = false;
-    return false;
-  };
-
-  dump("before");
-
-  bool ok1 = vfd_.set_stop_ramp();
-  delay(200);
-  dump("after_stop1");
-
-  bool ok2 = vfd_.reset_fault();
-  delay(300);
-  dump("after_reset");
-
-  bool ok3 = vfd_.set_stop_ramp();
-  delay(200);
-  dump("after_stop2");
-
-  if (!status_.faulted) {
+  bool ok = vfd_.reset_fault();
+  if (ok) {
+    status_.faulted = false;
+    status_.fault_code = 0;
     status_.target_milli_lpm = 0;
     status_.cmd_setpoint_raw = 0;
   }
-
-  Serial.print("[RST] write_ok stop1=");
-  Serial.print(ok1);
-  Serial.print(" reset=");
-  Serial.print(ok2);
-  Serial.print(" stop2=");
-  Serial.println(ok3);
-
-  return ok1 && ok2 && ok3 && !status_.faulted;
+  return ok;
 }
 
 bool PumpVfdNode::get_status(PumpNodeStatus* st) {

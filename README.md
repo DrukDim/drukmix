@@ -449,3 +449,25 @@ Rule:
 2. Move comm-loss recovery to ESP-side logic.
 3. Preserve operator-handled behavior for all non-communication faults.
 4. Validate real run behavior using different target speeds and observed status registers before deeper Klipper integration.
+
+
+## Firmware
+
+### Pump VFD baseline
+
+Станом на зараз baseline для `firmware/pump_vfd` такий:
+
+- `reset_fault()` у `firmware/pump_vfd/src/vfd_m980_driver.cpp` виконує **тільки** один Modbus write:
+  - register `0x0002`
+  - value `7`
+- Будь-яка логіка `stop -> reset -> stop`, `clear_fault_sequence_()`, `write_cmd_both_()` вважається експериментальною і не є baseline.
+- `PumpVfdNode::reset_fault()` у `firmware/pump_vfd/src/dmbus_pump_node.cpp` має бути простим:
+  - виклик `vfd_.reset_fault()`
+  - при `ok` скидати локальний `status_.faulted`, `status_.fault_code`, `status_.target_milli_lpm`, `status_.cmd_setpoint_raw`
+- При будь-яких подальших змінах reset/fault логіки спочатку звірятись з цим baseline і явно позначати відхилення як experiment.
+
+### Bridge baseline
+
+- `firmware/bridge` зараз не чіпаємо без окремої причини.
+- Поточна проблема локалізована в `pump_vfd`, не в bridge.
+

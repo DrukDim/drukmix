@@ -25,7 +25,7 @@ bool VfdM980Driver::set_stop_ramp() {
 }
 
 bool VfdM980Driver::reset_fault() {
-  return clear_fault_sequence_();
+  return modbus_.write_single_register(MODBUS_SLAVE_ID, REG_CMD_CONTROL, 7);
 }
 
 bool VfdM980Driver::set_frequency_pct_x100(uint16_t value) {
@@ -56,30 +56,3 @@ bool VfdM980Driver::poll_status(VfdStatus* st) {
   return true;
 }
 
-
-bool VfdM980Driver::write_cmd_both_(uint16_t value) {
-  // Legacy helper kept for compatibility, but no longer used in fault reset.
-  bool ok = modbus_.write_single_register(MODBUS_SLAVE_ID, REG_CMD_CONTROL, value);
-  delay(80);
-  return ok;
-}
-
-bool VfdM980Driver::clear_fault_sequence_() {
-  bool ok1 = modbus_.write_single_register(MODBUS_SLAVE_ID, REG_CMD_CONTROL, 6);  // STOP
-  delay(200);
-
-  bool ok2 = modbus_.write_single_register(MODBUS_SLAVE_ID, REG_CMD_CONTROL, 7);  // RESET
-  delay(350);
-
-  bool ok3 = modbus_.write_single_register(MODBUS_SLAVE_ID, REG_CMD_CONTROL, 6);  // STOP again
-  delay(200);
-
-  Serial.print("[DRV] clear_fault_sequence stop1=");
-  Serial.print(ok1 ? 1 : 0);
-  Serial.print(" reset=");
-  Serial.print(ok2 ? 1 : 0);
-  Serial.print(" stop2=");
-  Serial.println(ok3 ? 1 : 0);
-
-  return ok1 && ok2 && ok3;
-}
