@@ -16,8 +16,6 @@ void PumpVfdNode::begin() {
   status_.actual_milli_lpm = 0;
   status_.max_milli_lpm = max_milli_lpm_;
   status_.cmd_setpoint_raw = 0;
-  status_.actual_freq_x10 = 0;
-  status_.actual_speed_raw = 0;
 }
 
 void PumpVfdNode::handle_rx_() {
@@ -72,15 +70,11 @@ void PumpVfdNode::update() {
       status_.running = st.running;
       status_.fault_code = st.fault_code;
       status_.faulted = (st.fault_code != 0);
-      status_.actual_freq_x10 = st.actual_freq_x10;
-      status_.actual_speed_raw = st.actual_speed_raw;
-      status_.output_current_x10 = st.output_current_x10;
+      status_.actual_milli_lpm = 0;
     } else {
       status_.online = false;
       status_.running = false;
-      status_.actual_freq_x10 = 0;
-      status_.actual_speed_raw = 0;
-      status_.output_current_x10 = 0;
+      status_.actual_milli_lpm = 0;
     }
 
     link_.send_status(
@@ -92,11 +86,9 @@ void PumpVfdNode::update() {
         status_.running,
         status_.fault_code,
         status_.target_milli_lpm,
+        status_.actual_milli_lpm,
         status_.max_milli_lpm,
-        status_.cmd_setpoint_raw,
-        status_.actual_freq_x10,
-        status_.actual_speed_raw,
-        status_.output_current_x10);
+        status_.cmd_setpoint_raw);
 
     Serial.print("VFD online=");
     Serial.print(status_.online);
@@ -110,12 +102,12 @@ void PumpVfdNode::update() {
     Serial.print(status_.max_milli_lpm);
     Serial.print(" cmd_raw=");
     Serial.print(status_.cmd_setpoint_raw);
-    Serial.print(" actual_freq_x10=");
-    Serial.print(status_.actual_freq_x10);
-    Serial.print(" speed_raw=");
-    Serial.print(status_.actual_speed_raw);
-    Serial.print(" current_x10=");
-    Serial.println(status_.output_current_x10);
+    Serial.print(" vfd_freq_x10=");
+    Serial.print(st.actual_freq_x10);
+    Serial.print(" vfd_speed_raw=");
+    Serial.print(st.actual_speed_raw);
+    Serial.print(" vfd_current_x10=");
+    Serial.println(st.output_current_x10);
   }
 
   delay(2);

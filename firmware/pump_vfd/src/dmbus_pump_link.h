@@ -33,11 +33,9 @@ public:
       bool running,
       uint16_t fault_code,
       int32_t target_milli_lpm,
+      int32_t actual_milli_lpm,
       int32_t max_milli_lpm,
-      int32_t cmd_setpoint_raw,
-      int32_t actual_freq_x10,
-      int16_t actual_speed_raw,
-      uint16_t output_current_x10);
+      int32_t cmd_setpoint_raw);
 
 private:
   static void on_recv_thunk_(const uint8_t* mac_addr, const uint8_t* data, int len);
