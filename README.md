@@ -545,3 +545,274 @@ Rule:
 - `firmware/bridge` зараз не чіпаємо без окремої причини.
 - Поточна проблема локалізована в `pump_vfd`, не в bridge.
 
+
+## Agent architecture findings and refactor boundary
+
+Поточний `drukmix_agent.py` фактично змішує 4 різні шари в одному файлі:
+
+1. TPL-specific semantics
+2. host orchestration
+3. Moonraker integration
+4. bridge transport
+
+Це означає, що current agent зараз не є чистим універсальним orchestration layer.
+У ньому одночасно живуть:
+- логіка друку і синхронізації потоку
+- старі TPL-специфічні правила
+- Moonraker websocket / remote methods
+- USB framing / bridge transport details
+
+### Main architectural risk
+
+Головний ризик подальших змін:
+- адаптувати agent під VFD / dmbus
+- але залишити старі TPL-specific механіки всередині того ж шару
+- і далі компенсувати різницю новими умовами та хакaми
+
+Це створить важкий змішаний host-side код, який:
+- складно підтримувати
+- складно дебажити
+- може створювати зайве навантаження на CB1 / host system
+- погано масштабується на нові device types
+
+### Confirmed current agent layering
+
+#### 1. TPL-specific semantics
+У current agent присутні TPL-oriented маркери та логіка, які не можна вважати generic host abstraction:
+
+- `EF_MANUAL_FWD`
+- `EF_MANUAL_REV`
+- `EF_AUTO_ALLOWED`
+- `EF_AUTO_ACTIVE`
+- `EF_DIR_ASSERTED`
+- `EF_WIPER_TPL`
+- `decode_mode()`
+- `expected_code()`
+- `confirm_applied()`
+
+Висновок:
+- ці частини не повинні залишатися всередині generic agent core
+- їх треба або винести в окремий TPL-specific compatibility layer, або зберегти лише як legacy reference
+
+#### 2. Host orchestration
+У current agent already lives valid host-side orchestration logic:
+
+- print-state-dependent pumping
+- flow-from-motion logic через `live_extruder_velocity`
+- `flow_gain`
+- `retract_deadband_mm_s`
+- `retract_gain`
+- `min_run_lpm`
+- `min_run_hold_s`
+- `drukmix_flush`
+- `drukmix_flush_stop`
+- pause policy:
+  - `pause_on_pump_offline`
+  - `pause_on_manual_during_print`
+- `pause_with_popup()`
+
+Висновок:
+- саме цей шар і є правильною відповідальністю host agent
+- його не треба пхати в bridge або в device node
+- але його треба відокремити від transport/details/backend-specific logic
+
+#### 3. Moonraker integration
+У current agent є окремий Moonraker-facing шар:
+
+- `MoonrakerClient`
+- `connection.register_remote_method`
+- `printer.objects.subscribe`
+- `notify_status_update`
+- `printer.print.pause`
+- `RESPOND TYPE=...`
+
+Висновок:
+- це окремий integration layer
+- він не повинен бути змішаний з bus/device semantics
+- він має адаптувати Moonraker state до internal host model, а не нести backend-specific control logic
+
+#### 4. Bridge transport
+У current agent є окремий transport/glue layer:
+
+- `BridgeSerial`
+- `build_usb_packet()`
+- `parse_bridge_status()`
+- `USB_SET_FLOW`
+- `USB_SET_MAXLPM`
+- `USB_BRIDGE_STATUS`
+
+Висновок:
+- packet framing / COBS / CRC / bridge serial transport не повинні змішуватися з orchestration core
+- transport треба тримати окремим адаптером
+
+## Preserved TPL legacy snapshot
+
+Щоб не втратити стару TPL host logic перед refactor, у repo збережено окремий archival snapshot:
+
+- `agent/legacy_tlp/drukmix_agent_tlp_legacy.py`
+- `agent/legacy_tlp/drukmix_cfg_tlp_legacy.cfg`
+- `agent/legacy_tlp/drukmix_macros_tlp_legacy.cfg`
+- `docs/agent/tpl_legacy_snapshot.md`
+
+Правило:
+- цей snapshot є reference-only
+- його не refactor'ити inplace
+- він збережений як джерело поведінкової семантики TPL для майбутньої інтеграції
+
+## Current agent gaps already identified
+
+У current `drukmix_agent.py` already видно розрив між macro/API surface та реальною реалізацією.
+
+Поточні gaps:
+
+- `drukmix_set_limits` відсутній
+- `drukmix_clear_overrides` відсутній
+- `USB_RESET_FAULT` відсутній
+- `reset_fault` path відсутній
+
+Висновок:
+- current agent уже не повністю узгоджений з macros/config expectations
+- не можна безконтрольно нашаровувати нові можливості поверх цього стану
+- спочатку потрібне чітке розділення шарів
+
+## DMBus scope rule
+
+`dmbus v1` is the current canonical baseline for device communication.
+
+Його мета:
+
+- common command transport
+- common ACK semantics
+- common device status model
+- common node-to-host abstraction
+
+`dmbus v1` is not required to encode the entire product workflow.
+
+Higher-level behavior may still live above the bus, for example:
+
+- FLUSH orchestration
+- pause policy on faults
+- unconditional stop policy
+- override persistence
+- print-state-dependent actions
+
+If `dmbus v1` later proves insufficient for stable multi-device orchestration:
+
+- introducing `dmbus v2` is allowed
+- but only after stabilizing the current `v1` baseline
+- do not compensate protocol gaps with uncontrolled Python-side hacks
+
+## Moonraker / Mainsail integration rule
+
+Long-term integration must not stop at macro buttons only.
+
+Target direction:
+
+- pump state should be exposed as structured device/status data through Moonraker-facing integration
+- Mainsail should be able to render pump/device tiles from structured state, not only from ad-hoc macros
+- macros remain valid for operator actions, but must not be the only UI/control surface
+
+## Multi-device scaling rule
+
+This project is expected to grow beyond one pump backend.
+
+Future devices may include:
+
+- mixers
+- feeders / unloaders
+- silos
+- pressure sensors
+- temperature / humidity sensors
+- RPM / rotation feedback devices
+
+Therefore:
+
+- current architecture must scale to multiple external ESP32-based device nodes
+- shared bus and shared host abstractions are needed not only for VFD vs TPL, but for the future device family as a whole
+- avoid host-side designs that assume only one permanent pump-specific path
+
+## Host vs ESP responsibility rule
+
+Maximum reasonable low-level logic should be moved out of the host and into external ESP32 device nodes.
+
+### Device node should own:
+- hardware I/O
+- backend-specific actuation
+- local safety handling
+- local/manual input handling
+- backend-specific diagnostics
+- canonical ACK generation
+- canonical STATUS generation
+
+### Bridge should own:
+- transport only
+- forwarding
+- retry / timeout
+- compact host-visible status transport
+
+### Host agent should own:
+- print orchestration
+- motion-to-flow mapping
+- FLUSH / PRIME sequencing
+- pause / hold policy
+- override lifecycle
+- Moonraker / Mainsail integration
+- multi-device coordination at workflow level
+
+Висновок:
+- current architectural direction with external ESP32 nodes is correct
+- host should become lighter, not heavier
+- CB1-side logic should stay orchestration-oriented, not hardware-protocol-heavy
+
+## Current refactor boundary
+
+До тих пір, поки насос не буде синхронно крутитися на реальному принтері під час запуску файлу, не робити "cleanups for beauty".
+
+Поточний дозволений refactor boundary:
+
+1. preserve legacy behavior references
+2. separate current agent into clearer layers
+3. avoid losing TPL behavior knowledge
+4. do not add uncontrolled compatibility hacks
+5. do not redesign protocol prematurely before live synchronized printing works
+
+## Refactor order rule
+
+Перші 3 напрямки відділення в agent мають бути саме такі:
+
+### Step 1 — isolate TPL-specific semantics
+Перше, що треба відділити:
+- TPL-specific flags
+- TPL-specific mode decoding
+- TPL-specific applied-code/confirm semantics
+
+### Step 2 — isolate bridge transport
+Далі треба відділити:
+- USB framing
+- COBS/CRC packet handling
+- bridge serial transport API
+
+### Step 3 — isolate Moonraker adapter
+Далі треба відділити:
+- websocket RPC
+- remote methods
+- object subscriptions
+- UI/respond/pause bridge to Moonraker
+
+Після цього вже можна чисто формувати:
+
+- generic host orchestration core
+- TPL compatibility layer
+- VFD/dmbus path
+- future multi-device integrations
+
+## Current working conclusion
+
+Поточний вибір напряму вважається правильним:
+
+- `dmbus` варто продовжувати
+- максимум low-level logic варто виносити на ESP32
+- host agent має залишатися orchestration layer
+- TPL legacy behavior треба зберегти як reference
+- refactor має бути контрольований, без втрати поточної працездатності та без "костиль за костилем"
+
