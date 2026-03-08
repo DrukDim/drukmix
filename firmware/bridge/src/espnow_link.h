@@ -45,6 +45,14 @@ void espnow_send_maxlpm(
     uint32_t now_ms,
     EspNowState* st);
 
+void espnow_send_reset_fault(
+    const uint8_t mac[6],
+    uint8_t proto,
+    uint16_t seq,
+    uint16_t selector,
+    uint32_t now_ms,
+    EspNowState* st);
+
 void espnow_on_recv(
     const uint8_t* mac_addr,
     const uint8_t* data,

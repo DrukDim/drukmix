@@ -43,6 +43,12 @@ struct FramePumpSetMax {
   dmbus::FrameCrc crc;
 };
 
+struct FrameResetFault {
+  dmbus::Header h;
+  dmbus::ResetFault p;
+  dmbus::FrameCrc crc;
+};
+
 struct FrameAck {
   dmbus::Header h;
   dmbus::Ack p;
@@ -111,6 +117,35 @@ void espnow_send_maxlpm(
   f.h.payload_len = sizeof(dmbus::PumpSetMaxFlow);
 
   f.p.max_milli_lpm = pump_max_milli_lpm;
+  f.crc.crc16 = dmbus::frame_crc((const uint8_t*)&f, sizeof(f) - sizeof(f.crc));
+
+  esp_err_t r = esp_now_send(mac, (const uint8_t*)&f, sizeof(f));
+  if (st) {
+    if (r != ESP_OK) st->send_fail_count++;
+    st->last_send_ms = now_ms;
+  }
+}
+
+
+void espnow_send_reset_fault(
+    const uint8_t mac[6],
+    uint8_t proto,
+    uint16_t seq,
+    uint16_t selector,
+    uint32_t now_ms,
+    EspNowState* st) {
+
+  FrameResetFault f{};
+  f.h.proto_ver = proto;
+  f.h.msg_type = dmbus::MSG_CMD;
+  f.h.seq = seq;
+  f.h.src_node = BRIDGE_NODE_ID;
+  f.h.dst_node = PUMP_NODE_ID;
+  f.h.device_class = DEVICE_CLASS_BRIDGE;
+  f.h.opcode = dmbus::OP_RESET_FAULT;
+  f.h.payload_len = sizeof(dmbus::ResetFault);
+
+  f.p.fault_selector = selector;
   f.crc.crc16 = dmbus::frame_crc((const uint8_t*)&f, sizeof(f) - sizeof(f.crc));
 
   esp_err_t r = esp_now_send(mac, (const uint8_t*)&f, sizeof(f));

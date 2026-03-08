@@ -8,6 +8,7 @@ struct PumpRxCmd {
   int32_t  target_milli_lpm = 0;
   uint8_t  flags = 0;
   int32_t  pump_max_milli_lpm = 0;
+  uint16_t fault_selector = 0;
 };
 
 class DmBusPumpLink {
@@ -34,9 +35,9 @@ public:
       bool running,
       uint16_t fault_code,
       int32_t target_milli_lpm,
-      int32_t actual_milli_lpm,
       int32_t max_milli_lpm,
-      int32_t cmd_setpoint_raw);
+      int32_t cmd_setpoint_raw,
+      uint16_t pump_flags);
 
 private:
   static void on_recv_thunk_(const uint8_t* mac_addr, const uint8_t* data, int len);

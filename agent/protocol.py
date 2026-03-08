@@ -6,6 +6,7 @@ PROTO = 1
 USB_SET_FLOW = 1
 USB_PING = 2
 USB_SET_MAXLPM = 3
+USB_RESET_FAULT = 4
 USB_BRIDGE_STATUS = 101
 
 def crc16_ccitt_false(data: bytes) -> int:

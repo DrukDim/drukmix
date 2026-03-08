@@ -22,4 +22,7 @@ public:
 
 private:
   Rs485Modbus modbus_;
+
+  bool write_cmd_both_(uint16_t value);
+  bool clear_fault_sequence_();
 };

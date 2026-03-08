@@ -103,6 +103,36 @@ bool Rs485Modbus::write_single_register(uint8_t slave, uint16_t reg, uint16_t va
   return true;
 }
 
+bool Rs485Modbus::write_single_register_broadcast(uint16_t reg, uint16_t value) {
+  uint8_t tx[8];
+  tx[0] = 0;
+  tx[1] = 0x06;
+  tx[2] = (uint8_t)(reg >> 8);
+  tx[3] = (uint8_t)(reg & 0xFF);
+  tx[4] = (uint8_t)(value >> 8);
+  tx[5] = (uint8_t)(value & 0xFF);
+
+  uint16_t crc = crc16_modbus_(tx, 6);
+  tx[6] = (uint8_t)(crc & 0xFF);
+  tx[7] = (uint8_t)(crc >> 8);
+
+  while (VFD_SERIAL.available()) VFD_SERIAL.read();
+
+  set_tx_mode_(true);
+  delayMicroseconds(200);
+
+  size_t written = VFD_SERIAL.write(tx, sizeof(tx));
+  VFD_SERIAL.flush();
+
+  delayMicroseconds(200);
+  set_tx_mode_(false);
+
+  if (written != sizeof(tx)) return false;
+
+  delay(30);
+  return true;
+}
+
 bool Rs485Modbus::read_holding_registers(uint8_t slave, uint16_t reg, uint16_t count, uint16_t* out) {
   if (!out || count == 0 || count > 16) return false;
 

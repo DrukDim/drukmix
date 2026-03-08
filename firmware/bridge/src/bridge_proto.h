@@ -2,9 +2,10 @@
 #include <stdint.h>
 
 enum UsbType : uint8_t {
-  USB_SET_FLOW   = 1,
-  USB_PING       = 2,
-  USB_SET_MAXLPM = 3
+  USB_SET_FLOW    = 1,
+  USB_PING        = 2,
+  USB_SET_MAXLPM  = 3,
+  USB_RESET_FAULT = 4
 };
 
 enum UsbResp : uint8_t {

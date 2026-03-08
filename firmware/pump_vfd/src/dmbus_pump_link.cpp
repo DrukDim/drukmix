@@ -23,6 +23,12 @@ struct FramePumpSetMax {
   dmbus::FrameCrc crc;
 };
 
+struct FrameResetFault {
+  dmbus::Header h;
+  dmbus::ResetFault p;
+  dmbus::FrameCrc crc;
+};
+
 struct FrameAck {
   dmbus::Header h;
   dmbus::Ack p;
@@ -106,6 +112,23 @@ void DmBusPumpLink::on_recv_(const uint8_t* mac_addr, const uint8_t* data, int l
     rx_.msg_type = h->opcode;
     rx_.seq = h->seq;
     rx_.pump_max_milli_lpm = f->p.max_milli_lpm;
+    return;
+  }
+
+  if (h->opcode == dmbus::OP_RESET_FAULT &&
+      h->payload_len == sizeof(dmbus::ResetFault) &&
+      len == (int)sizeof(FrameResetFault)) {
+
+    const auto* f = reinterpret_cast<const FrameResetFault*>(data);
+    Serial.print("[RX] OP_RESET_FAULT seq=");
+    Serial.print(h->seq);
+    Serial.print(" selector=");
+    Serial.println(f->p.fault_selector);
+
+    rx_.valid = true;
+    rx_.msg_type = h->opcode;
+    rx_.seq = h->seq;
+    rx_.fault_selector = f->p.fault_selector;
     return;
   }
 }

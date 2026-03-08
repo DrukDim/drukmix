@@ -36,50 +36,43 @@ bool VfdM980Driver::set_frequency_pct_x100(uint16_t value) {
 bool VfdM980Driver::poll_status(VfdStatus* st) {
   if (!st) return false;
 
-  // Read one contiguous block: 0x1000..0x1006
-  // Used registers:
-  // 0 -> 0x1000 RUN_STATE
-  // 1 -> 0x1001 FAULT_CODE
-  // 3 -> 0x1003 RUN_FREQ
-  // 4 -> 0x1004 RUN_SPEED
-  // 6 -> 0x1006 OUT_CURRENT
-  uint16_t regs[7] = {0};
+  uint16_t regs[5] = {0};
 
-  if (!modbus_.read_holding_registers(MODBUS_SLAVE_ID, REG_RUN_STATE, 7, regs)) return false;
+  if (!modbus_.read_holding_registers(MODBUS_SLAVE_ID, REG_RUN_STATE, 1, &regs[0])) return false;
+  if (!modbus_.read_holding_registers(MODBUS_SLAVE_ID, REG_FAULT_CODE, 1, &regs[1])) return false;
+  if (!modbus_.read_holding_registers(MODBUS_SLAVE_ID, REG_RUN_FREQ, 1, &regs[2])) return false;
+  if (!modbus_.read_holding_registers(MODBUS_SLAVE_ID, REG_RUN_SPEED, 1, &regs[3])) return false;
+  if (!modbus_.read_holding_registers(MODBUS_SLAVE_ID, REG_OUT_CURRENT, 1, &regs[4])) return false;
 
   st->online = true;
   st->running = (regs[0] != 0);
   st->fault_code = regs[1];
-  st->actual_freq_x10 = (int16_t)regs[3];
-  st->actual_speed_raw = (int16_t)regs[4];
-  st->output_current_x10 = regs[6];
+  st->actual_freq_x10 = (int16_t)regs[2];
+  st->actual_speed_raw = (int16_t)regs[3];
+  st->output_current_x10 = regs[4];
   return true;
 }
 
 
 bool VfdM980Driver::write_cmd_both_(uint16_t value) {
-  // Legacy helper kept for compatibility, but no longer used in fault reset.
-  bool ok = modbus_.write_single_register(MODBUS_SLAVE_ID, REG_CMD_CONTROL, value);
-  delay(80);
-  return ok;
+  bool ok_b = modbus_.write_single_register_broadcast(REG_CMD_CONTROL, value);
+  delay(60);
+  bool ok_u = modbus_.write_single_register(MODBUS_SLAVE_ID, REG_CMD_CONTROL, value);
+  delay(60);
+  return ok_b || ok_u;
 }
 
 bool VfdM980Driver::clear_fault_sequence_() {
-  bool ok1 = modbus_.write_single_register(MODBUS_SLAVE_ID, REG_CMD_CONTROL, 6);  // STOP
-  delay(200);
+  bool ok = true;
 
-  bool ok2 = modbus_.write_single_register(MODBUS_SLAVE_ID, REG_CMD_CONTROL, 7);  // RESET
-  delay(350);
+  ok = write_cmd_both_(6) && ok;  // STOP
+  delay(150);
 
-  bool ok3 = modbus_.write_single_register(MODBUS_SLAVE_ID, REG_CMD_CONTROL, 6);  // STOP again
-  delay(200);
+  ok = write_cmd_both_(7) && ok;  // RESET
+  delay(250);
 
-  Serial.print("[DRV] clear_fault_sequence stop1=");
-  Serial.print(ok1 ? 1 : 0);
-  Serial.print(" reset=");
-  Serial.print(ok2 ? 1 : 0);
-  Serial.print(" stop2=");
-  Serial.println(ok3 ? 1 : 0);
+  ok = write_cmd_both_(6) && ok;  // STOP again
+  delay(150);
 
-  return ok1 && ok2 && ok3;
+  return ok;
 }

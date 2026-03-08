@@ -6,6 +6,7 @@ public:
   void begin();
 
   bool write_single_register(uint8_t slave, uint16_t reg, uint16_t value);
+  bool write_single_register_broadcast(uint16_t reg, uint16_t value);
   bool read_holding_registers(uint8_t slave, uint16_t reg, uint16_t count, uint16_t* out);
 
 private:

@@ -9,6 +9,7 @@ from protocol import (
     USB_PING,
     USB_SET_FLOW,
     USB_SET_MAXLPM,
+    USB_RESET_FAULT,
     USB_BRIDGE_STATUS,
     build_frame,
     cobs_decode,
@@ -162,3 +163,7 @@ class BridgeClient:
     def set_max_lpm(self, milli_lpm: int) -> dict:
         body = struct.pack("<i", int(milli_lpm))
         return self._request(USB_SET_MAXLPM, body)
+
+    def reset_fault(self, selector: int = 0) -> dict:
+        body = struct.pack("<H", int(selector) & 0xFFFF)
+        return self._request(USB_RESET_FAULT, body)

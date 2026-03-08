@@ -21,6 +21,9 @@ def main() -> None:
     s_max = sub.add_parser("set-max")
     s_max.add_argument("lpm", type=float)
 
+    s_reset = sub.add_parser("reset-fault")
+    s_reset.add_argument("--selector", type=int, default=0)
+
     sub.add_parser("stop")
 
     args = ap.parse_args()
@@ -36,6 +39,8 @@ def main() -> None:
             result = pump.set_flow_lpm(args.lpm, reverse=args.reverse, auto=not args.manual)
         elif args.cmd == "set-max":
             result = pump.set_max_lpm(args.lpm)
+        elif args.cmd == "reset-fault":
+            result = bridge.reset_fault(args.selector)
         elif args.cmd == "stop":
             result = pump.stop()
         else:
