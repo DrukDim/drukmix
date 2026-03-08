@@ -16,22 +16,499 @@ from typing import Any, Dict, Optional, Tuple
 import serial
 import websockets
 
-from agent.runtime.transport import (
-    PROTO,
-    USB_SET_FLOW,
-    USB_SET_MAXLPM,
-    USB_BRIDGE_STATUS,
-    FLAG_REV,
-    FLAG_STOP,
-    FLAG_AUTO,
-    crc16_ccitt_false,
-    cobs_encode,
-    cobs_decode,
-    build_usb_packet,
-    clamp,
-    parse_bridge_status,
-    BridgeSerial,
-)
+# ---------------- USB protocol (must match bridge firmware) ----------------
+PROTO = 1
+USB_SET_FLOW = 1       # body: i32 milli_lpm, u8 flags
+USB_SET_MAXLPM = 3     # body: i32 pump_max_milli_lpm
+USB_BRIDGE_STATUS = 101
+
+# Pump flags (passed through bridge)
+FLAG_REV = 0x01
+FLAG_STOP = 0x02
+FLAG_AUTO = 0x04
+
+# Pump err_flags bits (from pump firmware)
+EF_MANUAL_FWD = 0x0010
+EF_MANUAL_REV = 0x0020
+EF_AUTO_ALLOWED = 0x0040
+EF_AUTO_ACTIVE = 0x0080
+EF_DIR_ASSERTED = 0x0100
+EF_WIPER_TPL = 0x0200
+
+
+# ----------------- low-level helpers -----------------
+def crc16_ccitt_false(data: bytes) -> int:
+    crc = 0xFFFF
+    for b in data:
+        crc ^= (b << 8)
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0x1021) & 0xFFFF if (crc & 0x8000) else (crc << 1) & 0xFFFF
+    return crc
+
+
+def cobs_encode(payload: bytes) -> bytes:
+    out = bytearray()
+    code_ptr = 0
+    out.append(0)
+    code = 1
+    for b in payload:
+        if b == 0:
+            out[code_ptr] = code
+            code_ptr = len(out)
+            out.append(0)
+            code = 1
+        else:
+            out.append(b)
+            code += 1
+            if code == 0xFF:
+                out[code_ptr] = code
+                code_ptr = len(out)
+                out.append(0)
+                code = 1
+    out[code_ptr] = code
+    return bytes(out)
+
+
+def cobs_decode(frame: bytes) -> Optional[bytes]:
+    out = bytearray()
+    i, n = 0, len(frame)
+    while i < n:
+        code = frame[i]
+        if code == 0:
+            return None
+        i += 1
+        for _ in range(1, code):
+            if i >= n:
+                return None
+            out.append(frame[i])
+            i += 1
+        if code != 0xFF and i < n:
+            out.append(0)
+    return bytes(out)
+
+
+def build_usb_packet(msg_type: int, seq: int, body: bytes) -> bytes:
+    mono_ms = int(time.monotonic() * 1000) & 0xFFFFFFFF
+    hdr = struct.pack("<BBHI", PROTO, msg_type, seq & 0xFFFF, mono_ms)
+    payload = hdr + body
+    crc = crc16_ccitt_false(payload)
+    payload += struct.pack("<H", crc)
+    return cobs_encode(payload) + b"\x00"
+
+
+def clamp(x: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, x))
+
+
+# ----------------- config -----------------
+@dataclasses.dataclass
+class Cfg:
+    enabled: bool
+    moonraker_ws: str
+    serial_port: str
+    serial_baud: int
+
+    client_name: str
+    client_version: str
+    client_type: str
+    client_url: str
+
+    pump_max_lpm: float
+    min_run_lpm: float
+    min_run_hold_s: float
+    flow_gain: float
+
+    retract_deadband_mm_s: float
+    retract_gain: float
+
+    printer_cfg: str
+    filament_diameter_fallback: float
+
+    update_hz: float
+    poll_hz: float
+
+    # Safety policies
+    pause_on_pump_offline: bool
+    pause_on_manual_during_print: bool
+    ui_notify: bool
+
+    bridge_offline_timeout_s: float
+    pump_offline_timeout_s: float
+
+    # Logging
+    log_file: str
+    log_level: str
+    log_period_s: float
+
+    # FLUSH reliability
+    flush_burst_count: int
+    flush_burst_interval_ms: int
+    flush_confirm: bool
+    flush_confirm_timeout_s: float
+    flush_confirm_tolerance_code: int
+    flush_confirm_retries: int
+
+    cfg_reload_s: float
+    cfg_path: str = ""
+
+
+def _strip_inline_comment(v: str) -> str:
+    if v is None:
+        return ""
+    v = str(v)
+    v = v.split("#", 1)[0]
+    v = v.split(";", 1)[0]
+    return v.strip()
+
+
+def _get_float(s: configparser.SectionProxy, key: str, default: float) -> float:
+    raw = s.get(key, str(default))
+    return float(_strip_inline_comment(raw))
+
+
+def _get_int(s: configparser.SectionProxy, key: str, default: int) -> int:
+    raw = s.get(key, str(default))
+    return int(float(_strip_inline_comment(raw)))
+
+
+def _get_str(s: configparser.SectionProxy, key: str, default: str) -> str:
+    raw = s.get(key, default)
+    return _strip_inline_comment(raw)
+
+
+def load_config(path: str) -> Cfg:
+    cp = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
+    if not cp.read(path):
+        raise FileNotFoundError(path)
+    s = cp["drukmix"]
+
+    def get_bool(k, d=False):
+        raw = s.get(k, str(d))
+        raw = _strip_inline_comment(raw).lower()
+        return raw in ("1", "true", "yes", "on")
+
+    return Cfg(
+        enabled=get_bool("enabled", True),
+        moonraker_ws=_get_str(s, "moonraker_ws", "ws://127.0.0.1:7125/websocket"),
+        serial_port=_get_str(s, "serial_port", ""),
+        serial_baud=_get_int(s, "serial_baud", 921600),
+
+        client_name=_get_str(s, "client_name", "drukmix"),
+        client_version=_get_str(s, "client_version", "2.2.0"),
+        client_type=_get_str(s, "client_type", "agent"),
+        client_url=_get_str(s, "client_url", "https://drukos.local/drukmix"),
+
+        pump_max_lpm=_get_float(s, "pump_max_lpm", 10.0),
+        min_run_lpm=_get_float(s, "min_run_lpm", 0.20),
+        min_run_hold_s=_get_float(s, "min_run_hold_s", 5.0),
+        flow_gain=_get_float(s, "flow_gain", 1.0),
+
+        retract_deadband_mm_s=_get_float(s, "retract_deadband_mm_s", 0.20),
+        retract_gain=_get_float(s, "retract_gain", 1.0),
+
+        printer_cfg=_get_str(s, "printer_cfg", os.path.expanduser("~/printer_data/config/printer.cfg")),
+        filament_diameter_fallback=_get_float(s, "filament_diameter_fallback", 35.0),
+
+        update_hz=_get_float(s, "update_hz", 6.0),
+        poll_hz=_get_float(s, "poll_hz", 0.5),
+
+        pause_on_pump_offline=get_bool("pause_on_pump_offline", True),
+        pause_on_manual_during_print=get_bool("pause_on_manual_during_print", True),
+        ui_notify=get_bool("ui_notify", True),
+
+        bridge_offline_timeout_s=_get_float(s, "bridge_offline_timeout_s", 1.0),
+        pump_offline_timeout_s=_get_float(s, "pump_offline_timeout_s", 1.2),
+
+        log_file=_get_str(s, "log_file", os.path.expanduser("~/printer_data/logs/drukmix.log")),
+        log_level=_get_str(s, "log_level", "info").lower(),
+        log_period_s=_get_float(s, "log_period_s", 5.0),
+
+        flush_burst_count=_get_int(s, "flush_burst_count", 10),
+        flush_burst_interval_ms=_get_int(s, "flush_burst_interval_ms", 20),
+        flush_confirm=get_bool("flush_confirm", True),
+        flush_confirm_timeout_s=_get_float(s, "flush_confirm_timeout_s", 1.2),
+        flush_confirm_tolerance_code=_get_int(s, "flush_confirm_tolerance_code", 8),
+        flush_confirm_retries=_get_int(s, "flush_confirm_retries", 2),
+
+        cfg_reload_s=_get_float(s, "cfg_reload_s", 2.0),
+        cfg_path=path,
+    )
+
+
+# ----------------- printer cfg reading -----------------
+def read_filament_diameter_from_printer_cfg(path: str, fallback: float) -> float:
+    try:
+        txt = open(path, "r", encoding="utf-8", errors="ignore").read()
+    except Exception:
+        return fallback
+    m = re.search(r"(?ms)^\[extruder\]\s*(.*?)(^\[|\Z)", txt)
+    section = m.group(1) if m else txt
+    m2 = re.search(r"(?m)^\s*filament_diameter\s*:\s*([0-9]*\.?[0-9]+)\s*$", section)
+    if not m2:
+        return fallback
+    try:
+        d = float(m2.group(1))
+        return d if d > 0 else fallback
+    except Exception:
+        return fallback
+
+
+def liters_per_mm_from_diameter_mm(d: float) -> float:
+    r = d / 2.0
+    area_mm2 = math.pi * r * r
+    return area_mm2 / 1_000_000.0
+
+
+# ----------------- runtime state -----------------
+@dataclasses.dataclass
+class KlipperState:
+    print_state: str = "unknown"
+    idle_state: str = "unknown"
+    is_paused: bool = False
+    klippy_state: str = "unknown"
+    extrude_factor: float = 1.0
+    live_extruder_velocity: float = 0.0
+
+
+@dataclasses.dataclass
+class LinkState:
+    last_bridge_frame_t: float = 0.0
+    pump_link: int = 0
+    age_ms: Optional[int] = None
+    last_code: int = 0
+    err_flags: int = 0
+
+
+@dataclasses.dataclass
+class FlushState:
+    active: bool = False
+    lpm: float = 0.0
+    until_t: float = 0.0
+
+
+@dataclasses.dataclass
+class Overrides:
+    gain: Optional[float] = None
+    log_level: Optional[str] = None
+
+
+# ----------------- logging setup -----------------
+def setup_logger(log_file: str) -> logging.Logger:
+    lg = logging.getLogger("drukmix")
+    lg.setLevel(logging.INFO)
+    lg.handlers.clear()
+
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)
+    fh = RotatingFileHandler(log_file, maxBytes=5_000_000, backupCount=5)
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    fh.setFormatter(fmt)
+    lg.addHandler(fh)
+
+    sh = logging.StreamHandler()
+    sh.setFormatter(fmt)
+    lg.addHandler(sh)
+    return lg
+
+
+# ----------------- Moonraker client -----------------
+class MoonrakerClient:
+    def __init__(self, ws_url: str, cfg: Cfg):
+        self.ws_url = ws_url
+        self.cfg = cfg
+        self._ws = None
+        self._id = 1
+        self._pending: Dict[int, asyncio.Future] = {}
+        self._notify_q: asyncio.Queue = asyncio.Queue()
+        self._send_lock = asyncio.Lock()
+        self._reader_task: Optional[asyncio.Task] = None
+        self._closed = False
+
+    async def connect(self):
+        self._ws = await websockets.connect(self.ws_url, ping_interval=20, ping_timeout=20)
+        self._reader_task = asyncio.create_task(self._reader_loop())
+
+        await self.call("server.connection.identify", {
+            "client_name": self.cfg.client_name,
+            "version": self.cfg.client_version,
+            "type": self.cfg.client_type,
+            "url": self.cfg.client_url,
+        })
+
+        for m in (
+            "drukmix_ping",
+            "drukmix_status",
+            "drukmix_flush",
+            "drukmix_flush_stop",
+            "drukmix_set_gain",
+            "drukmix_set_debug",
+            "drukmix_reload_cfg",
+        ):
+            await self.call("connection.register_remote_method", {"method_name": m})
+
+        await self.call("printer.objects.subscribe", {
+            "objects": {
+                "print_stats": ["state"],
+                "idle_timeout": ["state"],
+                "pause_resume": ["is_paused"],
+                "gcode_move": ["extrude_factor"],
+                "motion_report": ["live_extruder_velocity"],
+                "webhooks": ["state", "state_message"],
+            }
+        })
+
+    async def close(self):
+        self._closed = True
+        try:
+            if self._ws:
+                await self._ws.close()
+        finally:
+            self._ws = None
+        if self._reader_task:
+            self._reader_task.cancel()
+            try:
+                await self._reader_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+            self._reader_task = None
+
+    async def _reader_loop(self):
+        try:
+            while True:
+                raw = await self._ws.recv()
+                msg = json.loads(raw)
+                if "id" in msg:
+                    req_id = msg["id"]
+                    fut = self._pending.pop(req_id, None)
+                    if fut and not fut.done():
+                        if "error" in msg:
+                            fut.set_exception(RuntimeError(f"Moonraker RPC error: {msg['error']}"))
+                        else:
+                            fut.set_result(msg.get("result"))
+                else:
+                    await self._notify_q.put(msg)
+        except Exception as e:
+            for fut in self._pending.values():
+                if fut and not fut.done():
+                    fut.set_exception(e)
+            self._pending.clear()
+            if not self._closed:
+                raise
+
+    async def call(self, method: str, params: Optional[dict] = None) -> Any:
+        req_id = self._id
+        self._id += 1
+        req = {"jsonrpc": "2.0", "method": method, "id": req_id}
+        if params is not None:
+            req["params"] = params
+        fut = asyncio.get_running_loop().create_future()
+        self._pending[req_id] = fut
+        async with self._send_lock:
+            await self._ws.send(json.dumps(req))
+        return await fut
+
+    def notify_nowait(self) -> Optional[dict]:
+        try:
+            return self._notify_q.get_nowait()
+        except asyncio.QueueEmpty:
+            return None
+
+    async def respond(self, level: str, msg: str):
+        if level not in ("echo", "command", "error"):
+            level = "echo"
+        safe = msg.replace('"', "'")
+        script = f'RESPOND TYPE={level} MSG="{safe}"'
+        await self.call("printer.gcode.script", {"script": script})
+
+    async def pause_print(self):
+        await self.call("printer.print.pause", {})
+
+
+# ----------------- Bridge serial -----------------
+def parse_bridge_status(payload: bytes) -> Optional[Dict[str, Any]]:
+    if len(payload) < 10:
+        return None
+    got_crc = struct.unpack_from("<H", payload, len(payload) - 2)[0]
+    calc_crc = crc16_ccitt_false(payload[:-2])
+    if got_crc != calc_crc:
+        return None
+
+    proto, msg_type, seq, mono_ms = struct.unpack_from("<BBHI", payload, 0)
+    if proto != PROTO or msg_type != USB_BRIDGE_STATUS:
+        return None
+
+    body = payload[8:-2]
+    if len(body) < (1 + 2 + 2 + 1 + 2 + 2 + 2 + 4):
+        return None
+
+    pump_link = body[0]
+    last_seen_div10 = struct.unpack_from("<H", body, 1)[0]
+    applied_code = body[5]
+    err_flags = struct.unpack_from("<H", body, 6)[0]
+    age_ms = None if last_seen_div10 == 65535 else int(last_seen_div10) * 10
+
+    return {
+        "pump_link": int(pump_link),
+        "age_ms": age_ms,
+        "code": int(applied_code),
+        "err_flags": int(err_flags),
+    }
+
+
+class BridgeSerial:
+    def __init__(self, port: str, baud: int):
+        self.port = port
+        self.baud = baud
+        self.ser: Optional[serial.Serial] = None
+        self.seq = 1
+        self.rx_buf = bytearray()
+
+    def open(self):
+        self.ser = serial.Serial(self.port, self.baud, timeout=0.0)
+        self.ser.reset_input_buffer()
+        self.ser.reset_output_buffer()
+
+    def close(self):
+        if self.ser:
+            self.ser.close()
+            self.ser = None
+
+    def send_set_maxlpm(self, pump_max_lpm: float):
+        milli = int(pump_max_lpm * 1000)
+        pkt = build_usb_packet(USB_SET_MAXLPM, self.seq, struct.pack("<i", milli))
+        self.seq = (self.seq + 1) & 0xFFFF
+        self.ser.write(pkt)
+
+    def send_flow(self, lpm: float, flags: int):
+        milli = int(lpm * 1000)
+        pkt = build_usb_packet(USB_SET_FLOW, self.seq, struct.pack("<iB", milli, flags & 0xFF))
+        self.seq = (self.seq + 1) & 0xFFFF
+        self.ser.write(pkt)
+
+    def read_status_frames(self):
+        data = self.ser.read(512)
+        if data:
+            self.rx_buf.extend(data)
+
+        frames = []
+        while True:
+            try:
+                idx = self.rx_buf.index(0)
+            except ValueError:
+                break
+            frame = bytes(self.rx_buf[:idx])
+            del self.rx_buf[:idx + 1]
+            if not frame:
+                continue
+            dec = cobs_decode(frame)
+            if dec is None:
+                continue
+            st = parse_bridge_status(dec)
+            if st:
+                frames.append(st)
+        return frames
+
 
 # ----------------- logic helpers -----------------
 def apply_status(ks: KlipperState, st: Dict[str, Any]) -> None:
