@@ -29,6 +29,11 @@ static PendingCmd g_pending_cmd = PENDING_NONE;
 
 static UsbLink g_usb;
 
+static uint32_t pending_ack_timeout_ms() {
+  if (g_pending_cmd == PENDING_RESET_FAULT) return 1500;
+  return ACK_TIMEOUT_MS;
+}
+
 static const PeerRecord* find_pump_peer() {
   return g_peer_table.find_by_node(0x0100);
 }
@@ -191,7 +196,7 @@ void loop() {
 
   if (g_now_state.wait_ack &&
       g_now_state.retry_left > 0 &&
-      (millis() - g_now_state.last_send_ms) > ACK_TIMEOUT_MS) {
+      (millis() - g_now_state.last_send_ms) > pending_ack_timeout_ms()) {
 
     const auto* p = find_pump_peer();
     if (p) {
@@ -237,7 +242,7 @@ void loop() {
 
   if (g_now_state.wait_ack &&
       g_now_state.retry_left == 0 &&
-      (millis() - g_now_state.last_send_ms) > ACK_TIMEOUT_MS) {
+      (millis() - g_now_state.last_send_ms) > pending_ack_timeout_ms()) {
     g_now_state.wait_ack = false;
     g_now_state.pending_seq = 0;
     g_pending_cmd = PENDING_NONE;
