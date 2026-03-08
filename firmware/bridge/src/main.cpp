@@ -194,6 +194,10 @@ void loop() {
     handle_usb_packet(pkt, pkt_len);
   }
 
+  if (!g_now_state.wait_ack && g_now_state.pending_seq == 0 && g_pending_cmd != PENDING_NONE) {
+    g_pending_cmd = PENDING_NONE;
+  }
+
   if (g_now_state.wait_ack &&
       g_now_state.retry_left > 0 &&
       (millis() - g_now_state.last_send_ms) > pending_ack_timeout_ms()) {
