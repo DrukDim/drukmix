@@ -17,8 +17,9 @@ public:
 
   void send_ack(
       uint16_t seq,
-      uint8_t applied_code,
-      uint16_t err_flags,
+      uint8_t ack_status,
+      uint16_t err_code,
+      uint16_t detail,
       uint8_t proto,
       uint16_t src_node,
       uint16_t dst_node,

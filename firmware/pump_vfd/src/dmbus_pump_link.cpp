@@ -112,8 +112,9 @@ void DmBusPumpLink::on_recv_(const uint8_t* mac_addr, const uint8_t* data, int l
 
 void DmBusPumpLink::send_ack(
     uint16_t seq,
-    uint8_t applied_code,
-    uint16_t err_flags,
+    uint8_t ack_status,
+    uint16_t err_code,
+    uint16_t detail,
     uint8_t proto,
     uint16_t src_node,
     uint16_t dst_node,
@@ -132,10 +133,10 @@ void DmBusPumpLink::send_ack(
   f.h.payload_len = sizeof(dmbus::Ack);
 
   f.p.ack_seq = seq;
-  f.p.status = applied_code ? dmbus::ACK_OK : dmbus::ACK_ERROR;
+  f.p.status = ack_status;
   f.p.reserved = 0;
-  f.p.err_code = err_flags ? dmbus::ERR_HW_FAILURE : dmbus::ERR_NONE;
-  f.p.detail = err_flags;
+  f.p.err_code = err_code;
+  f.p.detail = detail;
 
   f.crc.crc16 = dmbus::frame_crc((const uint8_t*)&f, sizeof(f) - sizeof(f.crc));
   esp_now_send(peer_mac_, (const uint8_t*)&f, sizeof(f));

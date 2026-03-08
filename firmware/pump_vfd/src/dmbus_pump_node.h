@@ -23,5 +23,7 @@ private:
   int32_t max_milli_lpm_ = 10000;
   PumpNodeStatus status_{};
 
+  bool is_manual_mode_active_() const;
+  uint16_t compose_pump_flags_() const;
   void handle_rx_();
 };
