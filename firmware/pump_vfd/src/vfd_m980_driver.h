@@ -22,5 +22,6 @@ public:
 
 private:
   Rs485Modbus modbus_;
+  bool clear_fault_sequence_();
 
 };

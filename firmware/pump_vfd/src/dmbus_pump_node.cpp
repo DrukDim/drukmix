@@ -130,6 +130,7 @@ void PumpVfdNode::update() {
         NODE_ID_PUMP_VFD,
         0x0001,
         DEVICE_CLASS_PUMP,
+        status_.online,
         status_.running,
         status_.fault_code,
         status_.target_milli_lpm,
@@ -167,6 +168,24 @@ bool PumpVfdNode::set_flow(int32_t target_milli_lpm) {
 
   if (target_milli_lpm <= 0) return stop();
 
+  VfdStatus st{};
+  if (vfd_.poll_status(&st)) {
+    status_.online = true;
+    status_.fault_code = st.fault_code;
+    status_.faulted = (st.fault_code != 0);
+    status_.running = status_.faulted ? false : st.running;
+  } else {
+    status_.online = false;
+    status_.running = false;
+    return false;
+  }
+
+  if (status_.faulted) {
+    status_.target_milli_lpm = 0;
+    status_.cmd_setpoint_raw = 0;
+    return false;
+  }
+
   int32_t pct_x100 = (target_milli_lpm * 10000L) / max_milli_lpm_;
   if (pct_x100 < 0) pct_x100 = 0;
   if (pct_x100 > 10000) pct_x100 = 10000;
@@ -189,14 +208,54 @@ bool PumpVfdNode::stop() {
 }
 
 bool PumpVfdNode::reset_fault() {
+  VfdStatus st{};
+
+  auto dump = [&](const char* tag) -> bool {
+    if (vfd_.poll_status(&st)) {
+      Serial.print("[RST] ");
+      Serial.print(tag);
+      Serial.print(" online=");
+      Serial.print(st.online);
+      Serial.print(" running=");
+      Serial.print(st.running);
+      Serial.print(" fault=");
+      Serial.print(st.fault_code);
+      Serial.print(" freq_x10=");
+      Serial.print(st.actual_freq_x10);
+      Serial.print(" speed=");
+      Serial.print(st.actual_speed_raw);
+      Serial.print(" current_x10=");
+      Serial.println(st.output_current_x10);
+
+      status_.online = true;
+      status_.fault_code = st.fault_code;
+      status_.faulted = (st.fault_code != 0);
+      status_.running = status_.faulted ? false : st.running;
+      return true;
+    }
+
+    Serial.print("[RST] ");
+    Serial.print(tag);
+    Serial.println(" poll_fail");
+    status_.online = false;
+    status_.running = false;
+    return false;
+  };
+
+  dump("before");
+
   bool ok = vfd_.reset_fault();
-  if (ok) {
-    status_.faulted = false;
-    status_.fault_code = 0;
+  dump("after_reset_seq");
+
+  if (!status_.faulted) {
     status_.target_milli_lpm = 0;
     status_.cmd_setpoint_raw = 0;
   }
-  return ok;
+
+  Serial.print("[RST] result=");
+  Serial.println(ok && !status_.faulted ? 1 : 0);
+
+  return ok && !status_.faulted;
 }
 
 bool PumpVfdNode::get_status(PumpNodeStatus* st) {
