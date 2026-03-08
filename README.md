@@ -481,13 +481,42 @@ Rule:
 - прибирати пункт тільки після явного підтвердження live-перевіркою
 
 Список:
-- [x] Знайдено робочий fault reset path для поточного M980: `stop -> reset -> stop`
+- [x] Знайдено робочий fault reset path для поточного M980: `stop -> reset -> stop` (live verified on hardware)
 - [x] Підтверджено правильний deployment sequence для `pump_vfd`: `rebuild -> export -> flash -> live verify`
-- [ ] Уточнити правильну семантику `running` для M980; поточне `RUN_STATE != physical motion`
+- [x] Уточнити правильну семантику `running` для M980; live-підтверджено: `running = (freq>0) or (speed!=0) or (current>0)`, а `RUN_STATE` не вважати ознакою фізичного руху
 - [ ] Дочистити bridge ACK/retry semantics
 - [ ] Перевірити та прибрати дублювання reset command/retry path
 - [ ] Після стабілізації прибрати зайвий debug/test code
 - [ ] Зробити clean architecture pass і прибрати застарілі/суперечливі baseline notes
+
+
+### Verified M980 live behavior
+
+Підтверджено live на стенді:
+
+- До reset:
+  - `fault=16`
+  - `running=0`
+  - `freq_x10=0`
+  - `speed=0`
+  - `current_x10=0`
+- Робочий reset sequence:
+  - `0x0002 = 6`
+  - `0x0002 = 7`
+  - `0x0002 = 6`
+- Після reset:
+  - `fault=0`
+  - `running=0`
+  - `freq_x10=0`
+  - `speed=0`
+  - `current_x10=0`
+
+Висновок:
+- для M980 `RUN_STATE (0x1000)` не використовувати як ознаку фізичного руху
+- для DrukMix `running` рахувати від фактичних telemetry-полів:
+  - `actual_freq_x10 > 0`
+  - або `actual_speed_raw != 0`
+  - або `output_current_x10 > 0`
 
 ### Bridge baseline
 

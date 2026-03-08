@@ -48,7 +48,7 @@ bool VfdM980Driver::poll_status(VfdStatus* st) {
   if (!modbus_.read_holding_registers(MODBUS_SLAVE_ID, REG_RUN_STATE, 7, regs)) return false;
 
   st->online = true;
-  st->running = (regs[0] != 0);
+  st->running = (regs[3] > 0) || ((int16_t)regs[4] != 0) || (regs[6] > 0);
   st->fault_code = regs[1];
   st->actual_freq_x10 = (int16_t)regs[3];
   st->actual_speed_raw = (int16_t)regs[4];
