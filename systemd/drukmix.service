@@ -14,7 +14,7 @@ Environment=DRUKMIX_CONFIG=/home/dan/printer_data/config/drukmix.cfg
 Environment=PYTHONUNBUFFERED=1
 
 WorkingDirectory=/home/dan
-ExecStart=/usr/bin/python3 /home/dan/drukmix_agent.py
+ExecStart=/usr/bin/python3 /home/dan/drukmix/agent/drukmix_agent.py
 
 Restart=always
 RestartSec=0.5
