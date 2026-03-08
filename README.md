@@ -457,14 +457,37 @@ Rule:
 
 Станом на зараз baseline для `firmware/pump_vfd` такий:
 
-- `reset_fault()` у `firmware/pump_vfd/src/vfd_m980_driver.cpp` виконує **тільки** один Modbus write:
-  - register `0x0002`
-  - value `7`
-- Будь-яка логіка `stop -> reset -> stop`, `clear_fault_sequence_()`, `write_cmd_both_()` вважається експериментальною і не є baseline.
-- `PumpVfdNode::reset_fault()` у `firmware/pump_vfd/src/dmbus_pump_node.cpp` має бути простим:
-  - виклик `vfd_.reset_fault()`
-  - при `ok` скидати локальний `status_.faulted`, `status_.fault_code`, `status_.target_milli_lpm`, `status_.cmd_setpoint_raw`
-- При будь-яких подальших змінах reset/fault логіки спочатку звірятись з цим baseline і явно позначати відхилення як experiment.
+- Для поточного стенду з M980 підтверджений робочий `reset_fault()` path:
+  - `REG_CMD_CONTROL (0x0002) = 6`  -> stop
+  - `REG_CMD_CONTROL (0x0002) = 7`  -> reset fault
+  - `REG_CMD_CONTROL (0x0002) = 6`  -> stop
+- Тобто робочий baseline reset fault для цього стенду — саме `stop -> reset -> stop`.
+- Спрощений варіант з одним write `0x0002 = 7` не вважати baseline для цього стенду, поки він не підтверджений окремим live тестом.
+- Висновки про reset/fault логіку дозволено робити тільки після повного deployment sequence:
+  - source change
+  - `rm -rf firmware/pump_vfd/.pio` (коли є сумніви або мінялась fault/reset/debug логіка)
+  - `cd firmware/pump_vfd && pio run`
+  - `cd ../.. && ./tools/export_firmware.sh`
+  - `./tools/flash_firmware.sh pump_vfd <port> <baud>`
+  - live verification через monitor і команди з bridge
+- Не змішувати monitor і direct host commands в один і той самий serial port pump node.
+- Якщо `pio device monitor` відкритий на pump ESP, агентом у той самий `/dev/cu.usbserial-*` порт не ходити.
+
+### Fixed checklist
+
+Правило:
+- не змінювати список довільно
+- додавати тільки підтверджені пункти
+- прибирати пункт тільки після явного підтвердження live-перевіркою
+
+Список:
+- [x] Знайдено робочий fault reset path для поточного M980: `stop -> reset -> stop`
+- [x] Підтверджено правильний deployment sequence для `pump_vfd`: `rebuild -> export -> flash -> live verify`
+- [ ] Уточнити правильну семантику `running` для M980; поточне `RUN_STATE != physical motion`
+- [ ] Дочистити bridge ACK/retry semantics
+- [ ] Перевірити та прибрати дублювання reset command/retry path
+- [ ] Після стабілізації прибрати зайвий debug/test code
+- [ ] Зробити clean architecture pass і прибрати застарілі/суперечливі baseline notes
 
 ### Bridge baseline
 
