@@ -53,9 +53,6 @@ void UsbLink::send_status(uint8_t proto, uint16_t seq_reply, const UsbStatusPayl
   *(int32_t*)(payload + off) = st.target_milli_lpm; off += 4;
   *(int32_t*)(payload + off) = st.actual_milli_lpm; off += 4;
   *(int32_t*)(payload + off) = st.hw_setpoint_raw; off += 4;
-  *(int32_t*)(payload + off) = st.actual_freq_x10; off += 4;
-  *(int16_t*)(payload + off) = st.actual_speed_raw; off += 2;
-  *(uint16_t*)(payload + off) = st.output_current_x10; off += 2;
   *(uint16_t*)(payload + off) = st.pump_flags; off += 2;
 
   uint16_t crc = crc16_ccitt_false(payload, off);

@@ -98,7 +98,7 @@ class BridgeClient:
             if resp_type != USB_BRIDGE_STATUS:
                 continue
 
-            if len(body) < 42:
+            if len(body) < 32:
                 continue
 
             off = 0
@@ -114,9 +114,6 @@ class BridgeClient:
             target_milli_lpm = struct.unpack_from("<i", body, off)[0]; off += 4
             actual_milli_lpm = struct.unpack_from("<i", body, off)[0]; off += 4
             hw_setpoint_raw = struct.unpack_from("<i", body, off)[0]; off += 4
-            actual_freq_x10 = struct.unpack_from("<i", body, off)[0]; off += 4
-            actual_speed_raw = struct.unpack_from("<h", body, off)[0]; off += 2
-            output_current_x10 = struct.unpack_from("<H", body, off)[0]; off += 2
             pump_flags = struct.unpack_from("<H", body, off)[0]; off += 2
 
             status = {
@@ -141,9 +138,6 @@ class BridgeClient:
                 "target_milli_lpm": target_milli_lpm,
                 "actual_milli_lpm": actual_milli_lpm,
                 "hw_setpoint_raw": hw_setpoint_raw,
-                "actual_freq_x10": actual_freq_x10,
-                "actual_speed_raw": actual_speed_raw,
-                "output_current_x10": output_current_x10,
                 "pump_flags": pump_flags,
             }
 

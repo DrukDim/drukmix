@@ -22,9 +22,6 @@ struct EspNowState {
   int32_t  actual_milli_lpm = 0;
   int32_t  max_milli_lpm = 0;
   int32_t  hw_setpoint_raw = 0;
-  int32_t  actual_freq_x10 = 0;
-  int16_t  actual_speed_raw = 0;
-  uint16_t output_current_x10 = 0;
   uint16_t pump_flags = 0;
 };
 

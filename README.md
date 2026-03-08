@@ -307,3 +307,92 @@ The next design focus should be:
 3. integrate that model with Klipper, Moonraker, and Mainsail
 
 The project should now prioritize system behavior over further transport-layer complexity.
+
+## Minimal shared pump runtime model
+
+The minimal shared runtime model must work for both:
+- VFD / Modbus pump backend
+- TPL / relay + analog backend
+
+This means the canonical model must describe pump behavior, not driver internals.
+
+### Canonical `PumpStatus` meaning
+
+`PumpStatus` should represent only shared runtime state that higher layers need for orchestration.
+
+Recommended shared fields:
+- `StatusCommon c`
+- `target_milli_lpm`
+- `actual_milli_lpm`
+- `max_milli_lpm`
+- `hw_setpoint_raw`
+- `link_flags`
+- `pump_flags`
+
+### Meaning of shared fields
+
+- `target_milli_lpm` = commanded target flow from the remote control layer
+- `actual_milli_lpm` = best available backend-independent estimate of real delivered flow
+- `max_milli_lpm` = active configured upper limit
+- `hw_setpoint_raw` = backend raw actuation value, exposed only as a generic debug/control field
+- `link_flags` = communication and transport visibility flags
+- `pump_flags` = logical runtime flags such as running, manual mode, remote mode, watchdog stop, hardware ready
+
+### What belongs in `pump_flags`
+
+`pump_flags` should carry shared logical conditions, for example:
+- `PUMP_FLAG_RUNNING`
+- `PUMP_FLAG_FORWARD`
+- `PUMP_FLAG_REVERSE`
+- `PUMP_FLAG_MANUAL_MODE`
+- `PUMP_FLAG_REMOTE_MODE`
+- `PUMP_FLAG_FAULT_LATCHED`
+- `PUMP_FLAG_WDOG_STOP`
+- `PUMP_FLAG_HW_READY`
+
+### What does NOT belong in canonical `PumpStatus`
+
+The canonical shared status should not directly depend on one backend family.
+
+Examples that should not live in canonical `PumpStatus`:
+- VFD output frequency
+- VFD shaft speed
+- VFD output current
+- TPL-specific relay diagnostics
+- TPL-specific potentiometer raw value
+- backend-private hardware diagnostics
+
+Those values may still exist, but they should be treated as backend diagnostics, not canonical pump state.
+
+## Backend diagnostics rule
+
+Backend-specific diagnostics are allowed, but they must be clearly separated from the shared control model.
+
+Examples:
+- VFD diagnostics:
+  - actual frequency
+  - motor speed
+  - output current
+  - raw drive fault register
+- TPL diagnostics:
+  - relay state
+  - selector state
+  - analog command value
+  - backend-specific fault inputs
+
+These diagnostics should not drive the project architecture.
+They are secondary to the shared pump abstraction.
+
+## Design consequence for next code changes
+
+Before adding more fields or transport payloads, check them against this rule:
+
+Question:
+- does this field describe shared pump behavior needed by host orchestration?
+
+If yes:
+- it may belong in canonical `PumpStatus`
+
+If no:
+- it should stay backend-local or move into an optional diagnostics path later
+

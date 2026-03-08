@@ -55,9 +55,6 @@ static void usb_send_status(uint16_t seq_reply) {
   st.target_milli_lpm = g_now_state.target_milli_lpm;
   st.actual_milli_lpm = g_now_state.actual_milli_lpm;
   st.hw_setpoint_raw = g_now_state.hw_setpoint_raw;
-  st.actual_freq_x10 = g_now_state.actual_freq_x10;
-  st.actual_speed_raw = g_now_state.actual_speed_raw;
-  st.output_current_x10 = g_now_state.output_current_x10;
   st.pump_flags = g_now_state.pump_flags;
 
   g_usb.send_status(BRIDGE_PROTO, seq_reply, st);

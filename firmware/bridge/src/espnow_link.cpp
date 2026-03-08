@@ -166,9 +166,6 @@ void espnow_on_recv(
     st->actual_milli_lpm = s->p.actual_milli_lpm;
     st->max_milli_lpm = s->p.max_milli_lpm;
     st->hw_setpoint_raw = s->p.hw_setpoint_raw;
-    st->actual_freq_x10 = s->p.actual_freq_x10;
-    st->actual_speed_raw = s->p.actual_speed_raw;
-    st->output_current_x10 = s->p.output_current_x10;
     st->pump_flags = s->p.pump_flags;
 
     st->last_applied = st->pump_running ? 1 : 0;

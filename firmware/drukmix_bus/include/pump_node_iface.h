@@ -12,9 +12,6 @@ struct PumpNodeStatus {
   int32_t max_milli_lpm = 0;
 
   int32_t cmd_setpoint_raw = 0;
-  int32_t actual_freq_x10 = 0;
-  int16_t actual_speed_raw = 0;
-  uint16_t output_current_x10 = 0;
 };
 
 class PumpNodeIface {
