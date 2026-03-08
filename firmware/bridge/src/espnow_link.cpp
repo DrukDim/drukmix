@@ -179,10 +179,14 @@ void espnow_on_recv(
       h->payload_len == sizeof(dmbus::Ack)) {
 
     const auto* a = reinterpret_cast<const FrameAck*>(data);
-    st->last_ack_seq = h->seq;
-    st->last_applied = (a->p.status == dmbus::ACK_OK) ? 1 : 0;
-    st->last_err = a->p.detail ? a->p.detail : a->p.err_code;
-    st->wait_ack = false;
+    st->last_ack_seq = a->p.ack_seq;
+
+    if (st->wait_ack && a->p.ack_seq == st->pending_seq) {
+      st->last_applied = (a->p.status == dmbus::ACK_OK) ? 1 : 0;
+      st->last_err = a->p.detail ? a->p.detail : a->p.err_code;
+      st->wait_ack = false;
+      st->pending_seq = 0;
+    }
     return;
   }
 
@@ -203,8 +207,6 @@ void espnow_on_recv(
     st->hw_setpoint_raw = s->p.hw_setpoint_raw;
     st->pump_flags = s->p.pump_flags;
 
-    st->last_applied = st->pump_running ? 1 : 0;
-    st->last_err = st->pump_fault_code;
     return;
   }
 }

@@ -91,6 +91,7 @@ static void handle_usb_packet(const uint8_t* pkt, size_t len) {
     g_flags = *(const uint8_t*)(body + 4);
 
     g_cmd_seq++;
+    g_now_state.pending_seq = g_cmd_seq;
     g_now_state.retry_left = MAX_RETRY;
     g_now_state.wait_ack = true;
     g_pending_cmd = PENDING_FLOW;
@@ -118,6 +119,7 @@ static void handle_usb_packet(const uint8_t* pkt, size_t len) {
 
     g_pump_max_milli_lpm = *(const int32_t*)body;
     ++g_cmd_seq;
+    g_now_state.pending_seq = g_cmd_seq;
     g_now_state.retry_left = MAX_RETRY;
     g_now_state.wait_ack = true;
     g_pending_cmd = PENDING_MAXLPM;
@@ -145,6 +147,7 @@ static void handle_usb_packet(const uint8_t* pkt, size_t len) {
     uint16_t selector = *(const uint16_t*)body;
     g_reset_selector = selector;
     ++g_cmd_seq;
+    g_now_state.pending_seq = g_cmd_seq;
     g_now_state.retry_left = MAX_RETRY;
     g_now_state.wait_ack = true;
     g_pending_cmd = PENDING_RESET_FAULT;
@@ -224,9 +227,11 @@ void loop() {
             &g_now_state);
       } else {
         g_now_state.wait_ack = false;
+        g_now_state.pending_seq = 0;
       }
     } else {
       g_now_state.wait_ack = false;
+      g_now_state.pending_seq = 0;
     }
   }
 
@@ -234,6 +239,7 @@ void loop() {
       g_now_state.retry_left == 0 &&
       (millis() - g_now_state.last_send_ms) > ACK_TIMEOUT_MS) {
     g_now_state.wait_ack = false;
+    g_now_state.pending_seq = 0;
     g_pending_cmd = PENDING_NONE;
   }
 

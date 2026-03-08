@@ -5,6 +5,7 @@ struct EspNowState {
   uint8_t  last_applied = 0;
   uint16_t last_err = 0;
   uint16_t last_ack_seq = 0;
+  uint16_t pending_seq = 0;
   uint32_t last_seen_ms = 0;
 
   bool     wait_ack = false;
