@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include "pump_node_iface.h"
 #include "vfd_m980_driver.h"
-#include "espnow_cmd_link.h"
+#include "dmbus_pump_link.h"
 
 class PumpVfdNode : public PumpNodeIface {
 public:
@@ -16,7 +16,7 @@ public:
 
 private:
   VfdM980Driver vfd_;
-  EspNowCmdLink link_;
+  DmBusPumpLink link_;
 
   uint32_t last_status_ms_ = 0;
   int32_t target_milli_lpm_ = 0;

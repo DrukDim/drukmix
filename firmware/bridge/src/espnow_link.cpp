@@ -146,7 +146,7 @@ void espnow_on_recv(
     const auto* a = reinterpret_cast<const FrameAck*>(data);
     st->last_ack_seq = h->seq;
     st->last_applied = (a->p.status == dmbus::ACK_OK) ? 1 : 0;
-    st->last_err = a->p.err_code;
+    st->last_err = a->p.detail ? a->p.detail : a->p.err_code;
     st->wait_ack = false;
     return;
   }

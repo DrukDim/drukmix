@@ -187,7 +187,9 @@ struct HelloAck {
 struct Ack {
   uint16_t ack_seq;
   uint8_t  status;
+  uint8_t  reserved;
   uint16_t err_code;
+  uint16_t detail;
 };
 
 struct Heartbeat {

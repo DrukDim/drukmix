@@ -133,7 +133,9 @@ void DmBusPumpLink::send_ack(
 
   f.p.ack_seq = seq;
   f.p.status = applied_code ? dmbus::ACK_OK : dmbus::ACK_ERROR;
+  f.p.reserved = 0;
   f.p.err_code = err_flags ? dmbus::ERR_HW_FAILURE : dmbus::ERR_NONE;
+  f.p.detail = err_flags;
 
   f.crc.crc16 = dmbus::frame_crc((const uint8_t*)&f, sizeof(f) - sizeof(f.crc));
   esp_now_send(peer_mac_, (const uint8_t*)&f, sizeof(f));
