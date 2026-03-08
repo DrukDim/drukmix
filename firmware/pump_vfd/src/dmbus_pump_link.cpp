@@ -151,9 +151,9 @@ void DmBusPumpLink::send_status(
     bool running,
     uint16_t fault_code,
     int32_t target_milli_lpm,
-    int32_t actual_milli_lpm,
     int32_t max_milli_lpm,
-    int32_t cmd_setpoint_raw) {
+    int32_t cmd_setpoint_raw,
+    uint16_t pump_flags) {
 
   if (!peer_known_) return;
 
@@ -176,11 +176,11 @@ void DmBusPumpLink::send_status(
   f.p.c.reserved = 0;
 
   f.p.target_milli_lpm = target_milli_lpm;
-  f.p.actual_milli_lpm = actual_milli_lpm;
+  f.p.actual_milli_lpm = 0;
   f.p.max_milli_lpm = max_milli_lpm;
   f.p.hw_setpoint_raw = cmd_setpoint_raw;
   f.p.link_flags = 0;
-  f.p.pump_flags = running ? dmbus::PUMP_FLAG_RUNNING : 0;
+  f.p.pump_flags = pump_flags;
 
   f.crc.crc16 = dmbus::frame_crc((const uint8_t*)&f, sizeof(f) - sizeof(f.crc));
   esp_now_send(peer_mac_, (const uint8_t*)&f, sizeof(f));
