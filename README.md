@@ -396,6 +396,34 @@ If yes:
 If no:
 - it should stay backend-local or move into an optional diagnostics path later
 
+## Printer deployment workflow
+
+Canonical printer-side layout:
+
+- repo: `/home/dan/drukmix`
+- agent entrypoint: `/home/dan/drukmix/agent/drukmix_agent.py`
+- live cfg: `/home/dan/printer_data/config/drukmix.cfg`
+- live macros: `/home/dan/printer_data/config/drukmix_macros.cfg`
+- systemd unit: `/etc/systemd/system/drukmix.service`
+
+Deployment helper:
+
+- `tools/drukmix`
+- install to `/usr/local/bin/drukmix`
+- normal update flow on printer:
+  - `drukmix fetch`
+  - `drukmix apply`
+  - `drukmix klipper-restart`
+
+During bring-up/debug printer-side changes may be captured back into repo:
+
+- `drukmix capture`
+- `drukmix publish "message"`
+
+Rule:
+- repo remains canonical source of truth
+- `capture/publish` are allowed only as controlled debugging workflow, not as a second architecture
+
 ## VFD architecture and docs
 
 ### Where to look first

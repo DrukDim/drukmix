@@ -8,10 +8,10 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 
 # -------------------- Paths (override via /etc/drukmix.env) --------------------
-DRUKMIX_REPO="${DRUKMIX_REPO:-/home/dan/drukmix_repo}"
+DRUKMIX_REPO="${DRUKMIX_REPO:-/home/dan/drukmix}"
 
 # live/runtime
-DRUKMIX_AGENT="${DRUKMIX_AGENT:-/home/dan/drukmix_agent.py}"
+DRUKMIX_AGENT_LIVE="${DRUKMIX_AGENT_LIVE:-/home/dan/drukmix/agent/drukmix_agent.py}"
 DRUKMIX_CFG="${DRUKMIX_CFG:-/home/dan/printer_data/config/drukmix.cfg}"
 DRUKMIX_MACROS="${DRUKMIX_MACROS:-/home/dan/printer_data/config/drukmix_macros.cfg}"
 DRUKMIX_UNIT="${DRUKMIX_UNIT:-/etc/systemd/system/drukmix.service}"
@@ -19,7 +19,7 @@ DRUKMIX_SERVICE="${DRUKMIX_SERVICE:-drukmix.service}"
 DRUKMIX_LOG="${DRUKMIX_LOG:-/home/dan/printer_data/logs/drukmix.log}"
 
 # repo/source-of-truth
-REPO_AGENT="$DRUKMIX_REPO/drukmix_agent.py"
+REPO_AGENT="$DRUKMIX_REPO/agent/drukmix_agent.py"
 REPO_CFG="$DRUKMIX_REPO/config/drukmix.cfg"
 REPO_MACROS="$DRUKMIX_REPO/config/drukmix_macros.cfg"
 REPO_UNIT="$DRUKMIX_REPO/systemd/drukmix.service"
@@ -32,11 +32,7 @@ need_repo(){
 }
 
 ensure_repo_dirs(){
-  mkdir -p "$DRUKMIX_REPO/config" "$DRUKMIX_REPO/systemd" "$DRUKMIX_REPO/tools"
-}
-
-as_root(){
-  sudo bash -lc "$*"
+  mkdir -p "$DRUKMIX_REPO/config" "$DRUKMIX_REPO/systemd" "$DRUKMIX_REPO/tools" "$DRUKMIX_REPO/agent"
 }
 
 cmd_help(){
@@ -44,8 +40,10 @@ cmd_help(){
 drukmix — helper (repo <-> live) + git workflow
 
 Core ideas:
-  - repo is source of truth: ~/drukmix_repo
-  - live files are runtime: /home/dan/... + /etc/systemd/...
+  - repo is source of truth: /home/dan/drukmix
+  - live files are runtime: ~/printer_data/config + /etc/systemd
+  - agent runs from repo path
+  - during bring-up/debug, capture/publish are allowed
 
 Commands:
   drukmix help
@@ -55,7 +53,7 @@ Commands:
   drukmix capture                copy LIVE -> REPO (no git)
   drukmix publish "msg"          capture + git add/commit/push
 
-  drukmix fetch                  git pull --rebase in repo
+  drukmix fetch                  git pull --ff-only in repo
   drukmix apply                  copy REPO -> LIVE + daemon-reload + restart agent
   drukmix update                 fetch + apply + klipper-restart
 
@@ -67,7 +65,9 @@ Commands:
   drukmix install-self           install this helper to /usr/local/bin/drukmix
 
 Notes:
-  - Helper does NOT touch firmware/other repo folders. Only core files + itself.
+  - helper copies cfg/macros/unit into live locations
+  - agent is expected at repo path: agent/drukmix_agent.py
+  - capture/publish are kept intentionally for printer-side debugging
 TXT
 }
 
@@ -80,7 +80,7 @@ cmd_status(){
   echo "Repo unit:      $REPO_UNIT"
   echo "Repo helper:    $REPO_HELPER"
   echo
-  echo "Live agent:     $DRUKMIX_AGENT"
+  echo "Live agent:     $DRUKMIX_AGENT_LIVE"
   echo "Live cfg:       $DRUKMIX_CFG"
   echo "Live macros:    $DRUKMIX_MACROS"
   echo "Live unit:      $DRUKMIX_UNIT"
@@ -92,7 +92,7 @@ cmd_status(){
 cmd_diff(){
   need_repo
   echo "=== agent diff ==="
-  diff -u "$DRUKMIX_AGENT" "$REPO_AGENT" || true
+  diff -u "$DRUKMIX_AGENT_LIVE" "$REPO_AGENT" || true
   echo
   echo "=== cfg diff ==="
   diff -u "$DRUKMIX_CFG" "$REPO_CFG" || true
@@ -115,18 +115,18 @@ cmd_capture(){
   need_repo
   ensure_repo_dirs
   echo "Capture LIVE -> REPO"
-  [[ -f "$DRUKMIX_AGENT" ]] || die "missing live agent: $DRUKMIX_AGENT"
+
+  [[ -f "$DRUKMIX_AGENT_LIVE" ]] || die "missing live agent: $DRUKMIX_AGENT_LIVE"
   [[ -f "$DRUKMIX_CFG" ]] || die "missing live cfg: $DRUKMIX_CFG"
   [[ -f "$DRUKMIX_MACROS" ]] || die "missing live macros: $DRUKMIX_MACROS"
   [[ -f "$DRUKMIX_UNIT" ]] || die "missing live unit: $DRUKMIX_UNIT"
 
-  cp -f "$DRUKMIX_AGENT" "$REPO_AGENT"
+  cp -f "$DRUKMIX_AGENT_LIVE" "$REPO_AGENT"
   chmod +x "$REPO_AGENT" || true
   cp -f "$DRUKMIX_CFG" "$REPO_CFG"
   cp -f "$DRUKMIX_MACROS" "$REPO_MACROS"
   sudo cp -f "$DRUKMIX_UNIT" "$REPO_UNIT"
 
-  # also capture helper itself if installed in system (optional)
   if [[ -f /usr/local/bin/drukmix ]]; then
     sudo cp -f /usr/local/bin/drukmix "$REPO_HELPER" || true
   fi
@@ -150,15 +150,14 @@ cmd_publish(){
 cmd_fetch(){
   need_repo
 
-  # Guard: if a rebase/merge is in progress, refuse to pull
   if [[ -d "$DRUKMIX_REPO/.git/rebase-apply" || -d "$DRUKMIX_REPO/.git/rebase-merge" ]]; then
-    die "git rebase in progress in repo. Run: cd $DRUKMIX_REPO && git rebase --abort (or resolve + --continue)"
+    die "git rebase in progress in repo. Resolve or abort first."
   fi
   if [[ -f "$DRUKMIX_REPO/.git/MERGE_HEAD" ]]; then
-    die "git merge in progress in repo. Run: cd $DRUKMIX_REPO && git merge --abort (or resolve + commit)"
+    die "git merge in progress in repo. Resolve or abort first."
   fi
 
-  git -C "$DRUKMIX_REPO" pull --rebase
+  git -C "$DRUKMIX_REPO" pull --ff-only
   echo "OK: fetched latest repo"
 }
 
@@ -171,8 +170,6 @@ cmd_apply(){
   [[ -f "$REPO_MACROS" ]] || die "missing repo macros: $REPO_MACROS"
   [[ -f "$REPO_UNIT" ]] || die "missing repo unit: $REPO_UNIT"
 
-  cp -f "$REPO_AGENT" "$DRUKMIX_AGENT"
-  chmod +x "$DRUKMIX_AGENT" || true
   cp -f "$REPO_CFG" "$DRUKMIX_CFG"
   cp -f "$REPO_MACROS" "$DRUKMIX_MACROS"
   sudo cp -f "$REPO_UNIT" "$DRUKMIX_UNIT"
@@ -180,7 +177,7 @@ cmd_apply(){
   sudo systemctl daemon-reload
   sudo systemctl restart "$DRUKMIX_SERVICE"
 
-  echo "OK: applied. If you changed macros/cfg: run 'drukmix klipper-restart' (or use 'drukmix update')."
+  echo "OK: applied. Agent runs from repo path."
 }
 
 cmd_update(){
@@ -196,7 +193,7 @@ cmd_restart(){
 
 cmd_klipper_restart(){
   if command -v curl >/dev/null 2>&1; then
-    curl -s localhost:7125/printer/restart >/dev/null || true
+    curl -fsS localhost:7125/printer/restart >/dev/null
     echo "Requested Klipper RESTART via Moonraker (localhost:7125)."
   else
     die "curl not found"
