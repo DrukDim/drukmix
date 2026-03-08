@@ -396,3 +396,28 @@ If yes:
 If no:
 - it should stay backend-local or move into an optional diagnostics path later
 
+## VFD architecture and docs
+
+### Where to look first
+
+- `docs/vfd/README.md` — index: what document to open and when
+- `docs/vfd/m900_m980_shared_semantics.md` — shared semantics for M900/M980
+- `docs/vfd/m900_m980_differences.md` — series differences and capability boundary
+- `docs/vfd/m900_m980_faults.md` — baseline fault map and recovery policy
+- `docs/vfd/modbus_driver_contract.md` — contract between `pump_vfd`, `bridge`, `agent`, and future Klipper integration
+- `config/vfd_profiles.yaml` — per-series profiles/capabilities
+
+### Project rules for VFD fault handling
+
+- Only communication-loss class faults are candidates for automatic recovery.
+- All other VFD faults must remain operator-visible and should pause/hold the print flow until investigated.
+- Fault recovery policy should live on the ESP / `pump_vfd` side, not in an external host service.
+- `running` must not be interpreted as proof of physical shaft motion when commanded frequency is zero.
+- Shared transport/status logic may be reused across M900 and M980, but series differences must stay in profiles/capabilities.
+
+### Current implementation direction
+
+1. Keep common Modbus transport and status model.
+2. Move comm-loss recovery to ESP-side logic.
+3. Preserve operator-handled behavior for all non-communication faults.
+4. Validate real run behavior using different target speeds and observed status registers before deeper Klipper integration.

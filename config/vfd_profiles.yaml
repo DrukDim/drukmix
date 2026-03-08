@@ -1,0 +1,17 @@
+m900:
+  family: m900
+  shared_driver_contract: true
+  auto_recover_comm_fault: true
+  strict_manual_faults: true
+  notes:
+    - richer feature set
+    - do not assume all features exist on m980
+
+m980:
+  family: m980
+  shared_driver_contract: true
+  auto_recover_comm_fault: true
+  strict_manual_faults: true
+  notes:
+    - high protection line
+    - do not assume m900 terminal/profile richness
