@@ -153,7 +153,7 @@ static void handle_usb_packet(const uint8_t* pkt, size_t len) {
     g_reset_selector = selector;
     ++g_cmd_seq;
     g_now_state.pending_seq = g_cmd_seq;
-    g_now_state.retry_left = MAX_RETRY;
+    g_now_state.retry_left = 0;
     g_now_state.wait_ack = true;
     g_pending_cmd = PENDING_RESET_FAULT;
 
@@ -233,10 +233,12 @@ void loop() {
       } else {
         g_now_state.wait_ack = false;
         g_now_state.pending_seq = 0;
+        g_pending_cmd = PENDING_NONE;
       }
     } else {
       g_now_state.wait_ack = false;
       g_now_state.pending_seq = 0;
+      g_pending_cmd = PENDING_NONE;
     }
   }
 
