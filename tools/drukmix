@@ -11,7 +11,7 @@ fi
 DRUKMIX_REPO="${DRUKMIX_REPO:-/home/dan/drukmix}"
 
 # live/runtime
-DRUKMIX_AGENT_LIVE="${DRUKMIX_AGENT_LIVE:-/home/dan/drukmix/agent/drukmix_agent.py}"
+DRUKMIX_AGENT_LIVE="${DRUKMIX_AGENT_LIVE:-/home/dan/drukmix/drukmix_agent.py}"
 DRUKMIX_CFG="${DRUKMIX_CFG:-/home/dan/printer_data/config/drukmix.cfg}"
 DRUKMIX_MACROS="${DRUKMIX_MACROS:-/home/dan/printer_data/config/drukmix_macros.cfg}"
 DRUKMIX_UNIT="${DRUKMIX_UNIT:-/etc/systemd/system/drukmix.service}"
@@ -19,7 +19,7 @@ DRUKMIX_SERVICE="${DRUKMIX_SERVICE:-drukmix.service}"
 DRUKMIX_LOG="${DRUKMIX_LOG:-/home/dan/printer_data/logs/drukmix.log}"
 
 # repo/source-of-truth
-REPO_AGENT="$DRUKMIX_REPO/agent/drukmix_agent.py"
+REPO_AGENT="$DRUKMIX_REPO/drukmix_agent.py"
 REPO_CFG="$DRUKMIX_REPO/config/drukmix.cfg"
 REPO_MACROS="$DRUKMIX_REPO/config/drukmix_macros.cfg"
 REPO_UNIT="$DRUKMIX_REPO/systemd/drukmix.service"
