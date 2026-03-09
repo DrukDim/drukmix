@@ -649,7 +649,7 @@ async def run_agent(cfg_path: str):
                         pass
                     await maybe_respond(mr, cfg.ui_notify, "error", "DrukMix: pump offline")
 
-                if cfg.pause_on_manual_mode and printing and (not ks.is_paused) and st.control_mode not in ("AUTO", "UNKNOWN"):
+                if cfg.pause_on_manual_mode and printing and (not ks.is_paused) and st.control_mode != "AUTO":
                     try:
                         await mr.pause_print()
                     except Exception:
