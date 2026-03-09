@@ -247,6 +247,12 @@ bool PumpVfdNode::reset_fault() {
   bool ok = vfd_.reset_fault();
   dump("after_reset_seq");
 
+  uint32_t t0 = millis();
+  while (ok && status_.faulted && (millis() - t0) < 2000) {
+    delay(150);
+    dump("wait_clear");
+  }
+
   if (!status_.faulted) {
     status_.target_milli_lpm = 0;
     status_.cmd_setpoint_raw = 0;
