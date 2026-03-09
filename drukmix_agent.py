@@ -401,6 +401,26 @@ class DummyTransport:
         }
 
 
+
+def parse_remote_call(msg):
+    method = msg.get("method")
+    params = msg.get("params")
+
+    if method == "notify_remote_method":
+        if isinstance(params, list) and len(params) >= 1:
+            rmethod = params[0]
+            rparams = params[1] if len(params) >= 2 and isinstance(params[1], dict) else {}
+            return rmethod, rparams
+        return None
+
+    if isinstance(method, str) and method.startswith("drukmix_"):
+        if not isinstance(params, dict):
+            params = {}
+        return method, params
+
+    return None
+
+
 async def maybe_respond(mr, ui_notify: bool, level: str, msg: str):
     if not ui_notify:
         return
@@ -473,6 +493,25 @@ async def run_agent(cfg_path: str):
 
             mr = MoonrakerClient(cfg.moonraker_ws, cfg)
             await mr.connect()
+
+            try:
+                sub = await mr.call("printer.objects.query", {
+                    "objects": {
+                        "print_stats": ["state"],
+                        "idle_timeout": ["state"],
+                        "pause_resume": ["is_paused"],
+                        "gcode_move": ["extrude_factor"],
+                        "motion_report": ["live_extruder_velocity"],
+                        "webhooks": ["state", "state_message"],
+                    }
+                })
+                if isinstance(sub, dict):
+                    status = sub.get("status", {})
+                    if isinstance(status, dict):
+                        apply_status(ks, status)
+            except Exception as e:
+                log.warning(f"drukmix: initial status query failed: {e}")
+
             log.info("drukmix: running")
 
             last_log_t = 0.0
@@ -523,10 +562,11 @@ async def run_agent(cfg_path: str):
                             apply_status(ks, params[0])
                         continue
 
-                    method = msg.get("method")
-                    params = msg.get("params") or {}
-                    if not isinstance(params, dict):
-                        params = {}
+                    rc = parse_remote_call(msg)
+                    if not rc:
+                        continue
+
+                    method, params = rc
 
                     if method == "drukmix_ping":
                         await maybe_respond(mr, cfg.ui_notify, "command", "DrukMix: ping OK")
