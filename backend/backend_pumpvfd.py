@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from backend.pump_backend_base import PumpBackend, PumpStatus
+from backend.vfd_faults import get_vfd_fault_info, format_vfd_fault
 
 
 def clamp(x: float, lo: float, hi: float) -> float:
@@ -11,6 +12,7 @@ class PumpVfdBackend(PumpBackend):
     name = "pumpvfd"
 
     def __init__(self, transport):
+        self._auto_reset_err16_done = False
         self.transport = transport
         self._last_target_pct = 0.0
         self._last_rev = False
@@ -69,3 +71,18 @@ class PumpVfdBackend(PumpBackend):
             telemetry_ok=True,
             age_ms=raw.get("age_ms"),
         )
+
+
+    def maybe_auto_reset_startup_fault(self, printing: bool, running: bool | None) -> bool:
+        st = self.poll_status()
+        if st.fault_code != 16:
+            return False
+        if self._auto_reset_err16_done:
+            return False
+        if printing:
+            return False
+        if running:
+            return False
+        self.reset_fault()
+        self._auto_reset_err16_done = True
+        return True

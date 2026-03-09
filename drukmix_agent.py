@@ -436,6 +436,7 @@ def build_status_text(st, cfg: Cfg) -> str:
         f"mode={st.control_mode} running={-1 if st.running is None else int(bool(st.running))} "
         f"rev={-1 if st.rev_active is None else int(bool(st.rev_active))} "
         f"fault={int(st.faulted)} code={st.fault_code} "
+        f"fault_text={st.fault_text} "
         f"target_pct={st.target_pct} applied_pct={st.applied_pct} age_ms={st.age_ms} "
         f"max_flow_lpm={cfg.max_flow_lpm} gain_pct={cfg.gain_pct} "
         f"min_print_mms={cfg.min_print_mms} min_flow_pct={cfg.min_flow_pct} hold_s={cfg.min_flow_hold_s}"
@@ -645,6 +646,14 @@ async def run_agent(cfg_path: str):
                 st = backend.poll_status()
 
                 printing = is_printing(ks)
+
+                if hasattr(backend, "maybe_auto_reset_startup_fault"):
+                    try:
+                        did_reset = backend.maybe_auto_reset_startup_fault(printing=printing, running=st.running)
+                        if did_reset:
+                            log.info("drukmix: safe one-shot auto-reset for Err16")
+                    except Exception as e:
+                        log.warning(f"drukmix: err16 auto-reset check failed: {e}")
                 if fs.active:
                     target_pct = fs.pct
                     rev = False
