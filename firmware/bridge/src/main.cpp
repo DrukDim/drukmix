@@ -8,6 +8,9 @@
 #include "usb_link.h"
 #include "peer_table.h"
 #include "dmbus_hello.h"
+#ifndef BUILD_GIT_HASH
+#define BUILD_GIT_HASH "dev"
+#endif
 
 static EspNowState g_now_state{};
 static PeerTable g_peer_table{};
@@ -176,6 +179,19 @@ static void handle_usb_packet(const uint8_t* pkt, size_t len) {
 void setup() {
   g_usb.begin(SERIAL_BAUD);
   delay(50);
+
+  Serial.println();
+  Serial.println("=== BRIDGE BOOT ===");
+  Serial.print("fw=");
+  Serial.print(BRIDGE_FW_VER_MAJOR);
+  Serial.print(".");
+  Serial.print(BRIDGE_FW_VER_MINOR);
+  Serial.print(".");
+  Serial.print(BRIDGE_FW_VER_PATCH);
+  Serial.print(" label=");
+  Serial.print(BRIDGE_FW_VER_LABEL);
+  Serial.print(" git=");
+  Serial.println(BUILD_GIT_HASH);
 
   espnow_begin(WIFI_CHANNEL);
 

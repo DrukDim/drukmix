@@ -7,4 +7,5 @@ static constexpr uint8_t  DRIVER_TYPE_PUMP_VFD = 2;
 
 static constexpr uint8_t FW_VER_MAJOR = 0;
 static constexpr uint8_t FW_VER_MINOR = 1;
-static constexpr uint8_t FW_VER_PATCH = 0;
+static constexpr uint8_t FW_VER_PATCH = 1;
+static constexpr const char* FW_VER_LABEL = "pump_vfd-reset-audit";

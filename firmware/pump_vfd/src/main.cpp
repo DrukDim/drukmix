@@ -3,6 +3,9 @@
 #include "pump_vfd_config.h"
 #include "node_identity.h"
 #include "espnow_hello.h"
+#ifndef BUILD_GIT_HASH
+#define BUILD_GIT_HASH "dev"
+#endif
 
 static PumpVfdNode g_node;
 
@@ -12,6 +15,19 @@ void setup() {
 
   Serial.begin(115200);
   delay(200);
+
+  Serial.println();
+  Serial.println("=== PUMP_VFD BOOT ===");
+  Serial.print("fw=");
+  Serial.print(FW_VER_MAJOR);
+  Serial.print(".");
+  Serial.print(FW_VER_MINOR);
+  Serial.print(".");
+  Serial.print(FW_VER_PATCH);
+  Serial.print(" label=");
+  Serial.print(FW_VER_LABEL);
+  Serial.print(" git=");
+  Serial.println(BUILD_GIT_HASH);
 
   espnow_hello_begin(WIFI_CHANNEL);
   espnow_get_local_uid(&uid_lo, &uid_hi);
