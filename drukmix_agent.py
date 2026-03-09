@@ -346,63 +346,6 @@ class MoonrakerClient:
         await self.call("printer.print.pause", {})
 
 
-class DummyTransport:
-    def __init__(self, port: str, baud: int):
-        self.port = port
-        self.baud = baud
-        self._opened = False
-        self._last_pct = 0.0
-        self._last_rev = False
-        self._last_t = 0.0
-        self._fault_code = 0
-        self._manual = False
-
-    def open(self):
-        self._opened = True
-
-    def close(self):
-        self._opened = False
-
-    def vfd_set_run(self, pct: float, rev: bool):
-        self._last_pct = pct
-        self._last_rev = rev
-        self._last_t = time.monotonic()
-
-    def vfd_stop(self):
-        self._last_pct = 0.0
-        self._last_t = time.monotonic()
-
-    def vfd_reset_fault(self):
-        self._fault_code = 0
-        self._last_t = time.monotonic()
-
-    def tpl_set_auto(self, pct: float, rev: bool):
-        self._last_pct = pct
-        self._last_rev = rev
-        self._last_t = time.monotonic()
-
-    def tpl_stop(self):
-        self._last_pct = 0.0
-        self._last_t = time.monotonic()
-
-    def read_status(self):
-        if not self._opened:
-            return None
-        age_ms = int(max(0.0, (time.monotonic() - self._last_t)) * 1000.0) if self._last_t else 0
-        mode = "MANUAL_REV" if self._manual and self._last_rev else ("MANUAL_FWD" if self._manual else "AUTO")
-        return {
-            "link_ok": True,
-            "control_mode": mode,
-            "running": self._last_pct > 0.0,
-            "rev_active": self._last_rev,
-            "faulted": self._fault_code != 0,
-            "fault_code": self._fault_code,
-            "applied_pct": self._last_pct,
-            "age_ms": age_ms,
-        }
-
-
-
 def parse_remote_call(msg):
     method = msg.get("method")
     params = msg.get("params")
@@ -655,6 +598,24 @@ async def run_agent(cfg_path: str):
                             log.info("drukmix: safe one-shot auto-reset for Err16")
                     except Exception as e:
                         log.warning(f"drukmix: err16 auto-reset check failed: {e}")
+
+                if st.faulted and st.fault_code > 0:
+                    info_pause = getattr(st, "fault_code", 0) not in (19, 26, 29, 52, 56)
+                    if printing:
+                        backend.stop()
+                        if info_pause and not ks.is_paused:
+                            try:
+                                await mr.pause_print()
+                            except Exception:
+                                pass
+
+                    msg = st.fault_text or f"VFD fault {st.fault_code}"
+                    if st.possible_causes:
+                        msg += " | Causes: " + " ; ".join(st.possible_causes[:2])
+                    if st.solutions:
+                        msg += " | Fix: " + " ; ".join(st.solutions[:2])
+
+                    await maybe_respond(mr, cfg.ui_notify, "error", msg)
                 if fs.active:
                     target_pct = fs.pct
                     rev = False

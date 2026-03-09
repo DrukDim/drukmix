@@ -2,12 +2,8 @@
 set -euo pipefail
 
 REPO_DIR="${HOME}/drukmix"
-INSTALL_DIR="${HOME}"
-AGENT_DST="${INSTALL_DIR}/drukmix_agent.py"
-BACKEND_DST="${INSTALL_DIR}/backend"
 CFG_DST="${HOME}/printer_data/config/drukmix.cfg"
 MACROS_DST="${HOME}/printer_data/config/drukmix_macros.cfg"
-PRINTER_CFG="${HOME}/printer_data/config/printer.cfg"
 SERVICE_DST="/etc/systemd/system/drukmix.service"
 
 require_repo() {
@@ -15,25 +11,18 @@ require_repo() {
 }
 
 copy_files() {
-  cp -f "$REPO_DIR/drukmix_agent.py" "$AGENT_DST"
-
-  rm -rf "$BACKEND_DST"
-  mkdir -p "$BACKEND_DST"
-  cp -f "$REPO_DIR"/backend/*.py "$BACKEND_DST"/
-
   cp -f "$REPO_DIR/config/drukmix.cfg" "$CFG_DST"
   cp -f "$REPO_DIR/config/drukmix_macros.cfg" "$MACROS_DST"
-
   sudo cp -f "$REPO_DIR/systemd/drukmix.service" "$SERVICE_DST"
 
-  chmod +x "$AGENT_DST"
-
   python3 -m py_compile \
-    "$AGENT_DST" \
-    "$BACKEND_DST/pump_backend_base.py" \
-    "$BACKEND_DST/backend_pumpvfd.py" \
-    "$BACKEND_DST/backend_pumptpl.py" \
-    "$BACKEND_DST/agent_core_logic.py"
+    "$REPO_DIR/drukmix_agent.py" \
+    "$REPO_DIR/backend/pump_backend_base.py" \
+    "$REPO_DIR/backend/backend_pumpvfd.py" \
+    "$REPO_DIR/backend/backend_pumptpl.py" \
+    "$REPO_DIR/backend/bridge_usb_transport.py" \
+    "$REPO_DIR/backend/agent_core_logic.py" \
+    "$REPO_DIR/backend/vfd_faults.py"
 }
 
 ensure_macro_include() {
@@ -91,7 +80,7 @@ show_status() {
 
   echo
   echo "== last drukmix log =="
-  tail -n 40 "$HOME/printer_data/logs/drukmix.log" || true
+  tail -n 60 "$HOME/printer_data/logs/drukmix.log" || true
 }
 
 do_update() {
@@ -134,24 +123,12 @@ do_logs() {
 }
 
 case "${1:-}" in
-  install)
-    do_install
-    ;;
-  update)
-    do_update
-    ;;
-  upgrade)
-    do_upgrade
-    ;;
-  restart)
-    do_restart
-    ;;
-  status)
-    show_status
-    ;;
-  logs)
-    do_logs
-    ;;
+  install) do_install ;;
+  update)  do_update ;;
+  upgrade) do_upgrade ;;
+  restart) do_restart ;;
+  status)  show_status ;;
+  logs)    do_logs ;;
   *)
     echo "usage: drukos {install|update|upgrade|restart|status|logs}"
     exit 1

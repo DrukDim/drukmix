@@ -10,9 +10,9 @@ import serial
 BRIDGE_PROTO = 1
 
 USB_SET_FLOW = 1
-USB_SET_MAXLPM = 2
-USB_RESET_FAULT = 3
-USB_PING = 4
+USB_PING = 2
+USB_SET_MAXLPM = 3
+USB_RESET_FAULT = 4
 USB_BRIDGE_STATUS = 101
 
 
@@ -187,9 +187,9 @@ class BridgeUsbTransport:
 
         return {
             "link_ok": pump_link,
-            "control_mode": "AUTO",
+            "control_mode": "UNKNOWN",
             "running": pump_running,
-            "rev_active": False,
+            "rev_active": None,
             "faulted": pump_fault_code != 0,
             "fault_code": pump_fault_code,
             "applied_pct": applied_pct,
