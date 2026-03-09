@@ -15,6 +15,15 @@ USB_SET_MAXLPM = 3
 USB_RESET_FAULT = 4
 USB_BRIDGE_STATUS = 101
 
+PUMP_FLAG_RUNNING       = 1 << 0
+PUMP_FLAG_FORWARD       = 1 << 1
+PUMP_FLAG_REVERSE       = 1 << 2
+PUMP_FLAG_MANUAL_MODE   = 1 << 3
+PUMP_FLAG_REMOTE_MODE   = 1 << 4
+PUMP_FLAG_FAULT_LATCHED = 1 << 5
+PUMP_FLAG_WDOG_STOP     = 1 << 6
+PUMP_FLAG_HW_READY      = 1 << 7
+
 
 def crc16_ccitt_false(data: bytes) -> int:
     crc = 0xFFFF
@@ -187,9 +196,17 @@ class BridgeUsbTransport:
 
         return {
             "link_ok": pump_link,
-            "control_mode": "UNKNOWN",
+            "control_mode": (
+                "MANUAL" if (pump_flags & PUMP_FLAG_MANUAL_MODE) else
+                "AUTO" if (pump_flags & PUMP_FLAG_REMOTE_MODE) else
+                "UNKNOWN"
+            ),
             "running": pump_running,
-            "rev_active": None,
+            "rev_active": (
+                True if (pump_flags & PUMP_FLAG_REVERSE) else
+                False if (pump_flags & PUMP_FLAG_FORWARD) else
+                None
+            ),
             "faulted": pump_fault_code != 0,
             "fault_code": pump_fault_code,
             "applied_pct": applied_pct,
