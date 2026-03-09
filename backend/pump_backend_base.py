@@ -21,6 +21,8 @@ class PumpStatus:
     solutions: list[str] = field(default_factory=list)
     can_auto_reset: bool = False
     auto_reset_attempted: bool = False
+    pause_print: bool = False
+    severity: str = ""
 
     target_pct: Optional[float] = None
     applied_pct: Optional[float] = None

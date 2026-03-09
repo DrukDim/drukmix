@@ -462,6 +462,7 @@ async def run_agent(cfg_path: str):
             last_log_t = 0.0
             last_cfg_check_t = 0.0
             last_cfg_mtime = 0.0
+            last_fault_notify_key = None
 
             while True:
                 now = time.monotonic()
@@ -600,22 +601,26 @@ async def run_agent(cfg_path: str):
                         log.warning(f"drukmix: err16 auto-reset check failed: {e}")
 
                 if st.faulted and st.fault_code > 0:
-                    info_pause = getattr(st, "fault_code", 0) not in (19, 26, 29, 52, 56)
                     if printing:
                         backend.stop()
-                        if info_pause and not ks.is_paused:
+                        if st.pause_print and not ks.is_paused:
                             try:
                                 await mr.pause_print()
                             except Exception:
                                 pass
 
-                    msg = st.fault_text or f"VFD fault {st.fault_code}"
-                    if st.possible_causes:
-                        msg += " | Causes: " + " ; ".join(st.possible_causes[:2])
-                    if st.solutions:
-                        msg += " | Fix: " + " ; ".join(st.solutions[:2])
+                    fault_key = (st.backend, st.fault_code, bool(st.link_ok))
+                    if fault_key != last_fault_notify_key:
+                        msg = st.fault_text or f"VFD fault {st.fault_code}"
+                        if st.possible_causes:
+                            msg += " | Causes: " + " ; ".join(st.possible_causes[:2])
+                        if st.solutions:
+                            msg += " | Fix: " + " ; ".join(st.solutions[:2])
+                        await maybe_respond(mr, cfg.ui_notify, "error", msg)
+                        last_fault_notify_key = fault_key
+                else:
+                    last_fault_notify_key = None
 
-                    await maybe_respond(mr, cfg.ui_notify, "error", msg)
                 if fs.active:
                     target_pct = fs.pct
                     rev = False
@@ -644,7 +649,7 @@ async def run_agent(cfg_path: str):
                         pass
                     await maybe_respond(mr, cfg.ui_notify, "error", "DrukMix: pump offline")
 
-                if cfg.pause_on_manual_mode and printing and (not ks.is_paused) and st.control_mode != "AUTO":
+                if cfg.pause_on_manual_mode and printing and (not ks.is_paused) and st.control_mode not in ("AUTO", "UNKNOWN"):
                     try:
                         await mr.pause_print()
                     except Exception:
