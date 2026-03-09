@@ -1,64 +1,57 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_DIR="${DRUKOS_REPO_DIR:-$HOME/drukmix}"
-AGENT_SRC="$REPO_DIR/drukmix_agent.py"
-CFG_SRC="$REPO_DIR/config/drukmix.cfg"
-MACROS_SRC="$REPO_DIR/config/drukmix_macros.cfg"
-SERVICE_SRC="$REPO_DIR/systemd/drukmix.service"
-
-AGENT_DST="$HOME/drukmix_agent.py"
-CFG_DST="$HOME/printer_data/config/drukmix.cfg"
-MACROS_DST="$HOME/printer_data/config/drukmix_macros.cfg"
+REPO_DIR="${HOME}/drukmix"
+INSTALL_DIR="${HOME}"
+AGENT_DST="${INSTALL_DIR}/drukmix_agent.py"
+BACKEND_DST="${INSTALL_DIR}/backend"
+CFG_DST="${HOME}/printer_data/config/drukmix.cfg"
+MACROS_DST="${HOME}/printer_data/config/drukmix_macros.cfg"
+PRINTER_CFG="${HOME}/printer_data/config/printer.cfg"
 SERVICE_DST="/etc/systemd/system/drukmix.service"
 
-need_cmd() {
-  command -v "$1" >/dev/null 2>&1 || {
-    echo "missing command: $1" >&2
-    exit 1
-  }
-}
-
-need_cmd git
-need_cmd python3
-need_cmd curl
-need_cmd systemctl
-
 require_repo() {
-  if [ ! -d "$REPO_DIR/.git" ]; then
-    echo "repo not found: $REPO_DIR" >&2
-    exit 1
-  fi
+  test -d "$REPO_DIR/.git"
 }
 
 copy_files() {
-  cp -f "$AGENT_SRC" "$AGENT_DST"
-  cp -f "$CFG_SRC" "$CFG_DST"
-  cp -f "$MACROS_SRC" "$MACROS_DST"
-  sudo cp -f "$SERVICE_SRC" "$SERVICE_DST"
+  cp -f "$REPO_DIR/drukmix_agent.py" "$AGENT_DST"
+
+  rm -rf "$BACKEND_DST"
+  mkdir -p "$BACKEND_DST"
+  cp -f "$REPO_DIR"/backend/*.py "$BACKEND_DST"/
+
+  cp -f "$REPO_DIR/config/drukmix.cfg" "$CFG_DST"
+  cp -f "$REPO_DIR/config/drukmix_macros.cfg" "$MACROS_DST"
+
+  sudo cp -f "$REPO_DIR/systemd/drukmix.service" "$SERVICE_DST"
+
   chmod +x "$AGENT_DST"
-  python3 -m py_compile "$AGENT_DST"
+
+  python3 -m py_compile \
+    "$AGENT_DST" \
+    "$BACKEND_DST/pump_backend_base.py" \
+    "$BACKEND_DST/backend_pumpvfd.py" \
+    "$BACKEND_DST/backend_pumptpl.py" \
+    "$BACKEND_DST/agent_core_logic.py"
 }
 
 ensure_macro_include() {
-  local printer_cfg="$HOME/printer_data/config/printer.cfg"
   python3 - <<'PY'
 from pathlib import Path
-p = Path.home() / "printer_data/config/printer.cfg"
+p = Path("/home/dan/printer_data/config/printer.cfg")
 lines = p.read_text().splitlines()
 
 out = []
 seen_macros = False
-
 for line in lines:
-    if line.strip() == "[include drukmix_macros.cfg]":
+    s = line.strip()
+    if s == "[include drukmix.cfg]":
+        continue
+    if s == "[include drukmix_macros.cfg]":
         if seen_macros:
             continue
         seen_macros = True
-        out.append("[include drukmix_macros.cfg]")
-        continue
-    if line.strip() == "[include drukmix.cfg]":
-        continue
     out.append(line)
 
 if not seen_macros:
@@ -78,6 +71,7 @@ reload_klipper() {
 restart_stack() {
   sudo systemctl daemon-reload
   sudo systemctl enable drukmix.service >/dev/null 2>&1 || true
+  sudo systemctl restart moonraker
   sudo systemctl restart drukmix.service
 }
 
@@ -85,7 +79,6 @@ show_status() {
   echo
   echo "== git =="
   git -C "$REPO_DIR" rev-parse --short HEAD || true
-  git -C "$REPO_DIR" status --short || true
 
   echo
   echo "== moonraker =="
@@ -98,7 +91,7 @@ show_status() {
 
   echo
   echo "== last drukmix log =="
-  tail -n 40 "$HOME/printer_data/logs/drukmix.log" 2>/dev/null || true
+  tail -n 40 "$HOME/printer_data/logs/drukmix.log" || true
 }
 
 do_update() {
@@ -131,6 +124,11 @@ do_upgrade() {
   show_status
 }
 
+do_restart() {
+  restart_stack
+  show_status
+}
+
 do_logs() {
   tail -f "$HOME/printer_data/logs/drukmix.log"
 }
@@ -146,8 +144,7 @@ case "${1:-}" in
     do_upgrade
     ;;
   restart)
-    restart_stack
-    show_status
+    do_restart
     ;;
   status)
     show_status
