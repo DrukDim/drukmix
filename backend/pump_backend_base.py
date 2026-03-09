@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 
@@ -13,10 +13,19 @@ class PumpStatus:
     rev_active: Optional[bool]
     faulted: bool
     fault_code: int
-    target_pct: Optional[float]
-    applied_pct: Optional[float]
-    telemetry_ok: bool
-    age_ms: Optional[int]
+
+    fault_display: str = ""
+    fault_name: str = ""
+    fault_text: str = ""
+    possible_causes: list[str] = field(default_factory=list)
+    solutions: list[str] = field(default_factory=list)
+    can_auto_reset: bool = False
+    auto_reset_attempted: bool = False
+
+    target_pct: Optional[float] = None
+    applied_pct: Optional[float] = None
+    telemetry_ok: bool = False
+    age_ms: Optional[int] = None
 
 
 class PumpBackend:

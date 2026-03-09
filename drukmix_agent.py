@@ -18,6 +18,7 @@ import websockets
 
 from backend.agent_core_logic import CoreInput, CoreSettings, DrukMixCore
 from backend.backend_pumpvfd import PumpVfdBackend
+from backend.bridge_usb_transport import BridgeUsbTransport
 from backend.backend_pumptpl import PumpTplBackend
 
 
@@ -472,7 +473,7 @@ async def run_agent(cfg_path: str):
         try:
             cfg = load_config(cfg_path)
 
-            transport = DummyTransport(cfg.serial_port, cfg.serial_baud)
+            transport = BridgeUsbTransport(cfg.serial_port, cfg.serial_baud)
             if cfg.backend == "pumptpl":
                 backend = PumpTplBackend(transport)
             else:
