@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_DIR="${DRUKOS_REPO_DIR:-$HOME/drukmix}"
+AGENT_SRC="$REPO_DIR/drukmix_agent.py"
+CFG_SRC="$REPO_DIR/config/drukmix.cfg"
+MACROS_SRC="$REPO_DIR/config/drukmix_macros.cfg"
+SERVICE_SRC="$REPO_DIR/systemd/drukmix.service"
+
+AGENT_DST="$HOME/drukmix_agent.py"
+CFG_DST="$HOME/printer_data/config/drukmix.cfg"
+MACROS_DST="$HOME/printer_data/config/drukmix_macros.cfg"
+SERVICE_DST="/etc/systemd/system/drukmix.service"
+
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "missing command: $1" >&2
+    exit 1
+  }
+}
+
+need_cmd git
+need_cmd python3
+need_cmd curl
+need_cmd systemctl
+
+require_repo() {
+  if [ ! -d "$REPO_DIR/.git" ]; then
+    echo "repo not found: $REPO_DIR" >&2
+    exit 1
+  fi
+}
+
+copy_files() {
+  cp -f "$AGENT_SRC" "$AGENT_DST"
+  cp -f "$CFG_SRC" "$CFG_DST"
+  cp -f "$MACROS_SRC" "$MACROS_DST"
+  sudo cp -f "$SERVICE_SRC" "$SERVICE_DST"
+  chmod +x "$AGENT_DST"
+  python3 -m py_compile "$AGENT_DST"
+}
+
+ensure_macro_include() {
+  local printer_cfg="$HOME/printer_data/config/printer.cfg"
+  python3 - <<'PY'
+from pathlib import Path
+p = Path.home() / "printer_data/config/printer.cfg"
+lines = p.read_text().splitlines()
+
+out = []
+seen_macros = False
+
+for line in lines:
+    if line.strip() == "[include drukmix_macros.cfg]":
+        if seen_macros:
+            continue
+        seen_macros = True
+        out.append("[include drukmix_macros.cfg]")
+        continue
+    if line.strip() == "[include drukmix.cfg]":
+        continue
+    out.append(line)
+
+if not seen_macros:
+    out.append("[include drukmix_macros.cfg]")
+
+p.write_text("\n".join(out) + "\n")
+print("printer.cfg normalized")
+PY
+}
+
+reload_klipper() {
+  curl -s -X POST localhost:7125/printer/gcode/script \
+    -H 'Content-Type: application/json' \
+    -d '{"script":"FIRMWARE_RESTART"}' >/dev/null || true
+}
+
+restart_stack() {
+  sudo systemctl daemon-reload
+  sudo systemctl enable drukmix.service >/dev/null 2>&1 || true
+  sudo systemctl restart drukmix.service
+}
+
+show_status() {
+  echo
+  echo "== git =="
+  git -C "$REPO_DIR" rev-parse --short HEAD || true
+  git -C "$REPO_DIR" status --short || true
+
+  echo
+  echo "== moonraker =="
+  curl -s localhost:7125/server/info || true
+  echo
+
+  echo
+  echo "== drukmix.service =="
+  systemctl status drukmix.service --no-pager -l || true
+
+  echo
+  echo "== last drukmix log =="
+  tail -n 40 "$HOME/printer_data/logs/drukmix.log" 2>/dev/null || true
+}
+
+do_update() {
+  require_repo
+  git -C "$REPO_DIR" pull --ff-only
+  copy_files
+  ensure_macro_include
+  reload_klipper
+  restart_stack
+  show_status
+}
+
+do_install() {
+  require_repo
+  copy_files
+  ensure_macro_include
+  reload_klipper
+  restart_stack
+  show_status
+}
+
+do_upgrade() {
+  require_repo
+  git -C "$REPO_DIR" fetch --all --tags
+  git -C "$REPO_DIR" pull --ff-only
+  copy_files
+  ensure_macro_include
+  reload_klipper
+  restart_stack
+  show_status
+}
+
+do_logs() {
+  tail -f "$HOME/printer_data/logs/drukmix.log"
+}
+
+case "${1:-}" in
+  install)
+    do_install
+    ;;
+  update)
+    do_update
+    ;;
+  upgrade)
+    do_upgrade
+    ;;
+  restart)
+    restart_stack
+    show_status
+    ;;
+  status)
+    show_status
+    ;;
+  logs)
+    do_logs
+    ;;
+  *)
+    echo "usage: drukos {install|update|upgrade|restart|status|logs}"
+    exit 1
+    ;;
+esac
