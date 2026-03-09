@@ -230,6 +230,19 @@ def is_printing(ks: KlipperState) -> bool:
     return (ps == "printing") or (it == "printing")
 
 
+async def wait_moonraker_ready(log, ws_url: str, timeout_s: float = 30.0):
+    deadline = time.monotonic() + timeout_s
+    last_err = None
+    while time.monotonic() < deadline:
+        try:
+            ws = await websockets.connect(ws_url, ping_interval=20, ping_timeout=20)
+            await ws.close()
+            return
+        except Exception as e:
+            last_err = e
+            await asyncio.sleep(0.5)
+    raise RuntimeError(f"Moonraker not ready: {last_err}")
+
 class MoonrakerClient:
     def __init__(self, ws_url: str, cfg: Cfg):
         self.ws_url = ws_url
@@ -436,6 +449,7 @@ async def run_agent(cfg_path: str):
             ks = KlipperState()
             fs = FlushState()
 
+            await wait_moonraker_ready(log, cfg.moonraker_ws, timeout_s=30.0)
             mr = MoonrakerClient(cfg.moonraker_ws, cfg)
             await mr.connect()
 
