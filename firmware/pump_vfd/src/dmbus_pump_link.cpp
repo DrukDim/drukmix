@@ -51,8 +51,20 @@ void DmBusPumpLink::begin(uint8_t proto) {
 }
 
 PumpRxCmd DmBusPumpLink::pop_rx() {
-  PumpRxCmd out = rx_;
-  rx_ = {};
+  PumpRxCmd out{};
+
+  portENTER_CRITICAL(&rx_mux_);
+  if (reset_pending_) {
+    out = reset_rx_;
+    reset_rx_ = {};
+    reset_pending_ = false;
+  } else if (rx_pending_) {
+    out = rx_;
+    rx_ = {};
+    rx_pending_ = false;
+  }
+  portEXIT_CRITICAL(&rx_mux_);
+
   return out;
 }
 
@@ -95,11 +107,15 @@ void DmBusPumpLink::on_recv_(const uint8_t* mac_addr, const uint8_t* data, int l
       len == (int)sizeof(FramePumpSetFlow)) {
 
     const auto* f = reinterpret_cast<const FramePumpSetFlow*>(data);
+    portENTER_CRITICAL_ISR(&rx_mux_);
+    rx_ = {};
     rx_.valid = true;
     rx_.msg_type = h->opcode;
     rx_.seq = h->seq;
     rx_.target_milli_lpm = f->p.target_milli_lpm;
     rx_.flags = f->p.flags;
+    rx_pending_ = true;
+    portEXIT_CRITICAL_ISR(&rx_mux_);
     return;
   }
 
@@ -108,10 +124,14 @@ void DmBusPumpLink::on_recv_(const uint8_t* mac_addr, const uint8_t* data, int l
       len == (int)sizeof(FramePumpSetMax)) {
 
     const auto* f = reinterpret_cast<const FramePumpSetMax*>(data);
+    portENTER_CRITICAL_ISR(&rx_mux_);
+    rx_ = {};
     rx_.valid = true;
     rx_.msg_type = h->opcode;
     rx_.seq = h->seq;
     rx_.pump_max_milli_lpm = f->p.max_milli_lpm;
+    rx_pending_ = true;
+    portEXIT_CRITICAL_ISR(&rx_mux_);
     return;
   }
 
@@ -120,15 +140,14 @@ void DmBusPumpLink::on_recv_(const uint8_t* mac_addr, const uint8_t* data, int l
       len == (int)sizeof(FrameResetFault)) {
 
     const auto* f = reinterpret_cast<const FrameResetFault*>(data);
-    Serial.print("[RX] OP_RESET_FAULT seq=");
-    Serial.print(h->seq);
-    Serial.print(" selector=");
-    Serial.println(f->p.fault_selector);
-
-    rx_.valid = true;
-    rx_.msg_type = h->opcode;
-    rx_.seq = h->seq;
-    rx_.fault_selector = f->p.fault_selector;
+    portENTER_CRITICAL_ISR(&rx_mux_);
+    reset_rx_ = {};
+    reset_rx_.valid = true;
+    reset_rx_.msg_type = h->opcode;
+    reset_rx_.seq = h->seq;
+    reset_rx_.fault_selector = f->p.fault_selector;
+    reset_pending_ = true;
+    portEXIT_CRITICAL_ISR(&rx_mux_);
     return;
   }
 }

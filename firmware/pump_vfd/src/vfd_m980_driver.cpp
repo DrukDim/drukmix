@@ -68,12 +68,5 @@ bool VfdM980Driver::clear_fault_sequence_() {
   bool ok3 = modbus_.write_single_register(MODBUS_SLAVE_ID, REG_CMD_CONTROL, 6);
   delay(200);
 
-  Serial.print("[DRV] clear_fault_sequence stop1=");
-  Serial.print(ok1 ? 1 : 0);
-  Serial.print(" reset=");
-  Serial.print(ok2 ? 1 : 0);
-  Serial.print(" stop2=");
-  Serial.println(ok3 ? 1 : 0);
-
   return ok1 && ok2 && ok3;
 }

@@ -50,15 +50,7 @@ void PumpVfdNode::handle_rx_() {
   }
 
   if (rx.msg_type == dmbus::OP_RESET_FAULT) {
-    Serial.print("[CMD] OP_RESET_FAULT seq=");
-    Serial.print(rx.seq);
-    Serial.print(" selector=");
-    Serial.println(rx.fault_selector);
-
     bool ok = reset_fault();
-
-    Serial.print("[CMD] OP_RESET_FAULT result=");
-    Serial.println(ok ? 1 : 0);
 
     link_.send_ack(
         rx.seq,
@@ -210,23 +202,8 @@ bool PumpVfdNode::stop() {
 bool PumpVfdNode::reset_fault() {
   VfdStatus st{};
 
-  auto dump = [&](const char* tag) -> bool {
+  auto dump = [&](const char* /*tag*/) -> bool {
     if (vfd_.poll_status(&st)) {
-      Serial.print("[RST] ");
-      Serial.print(tag);
-      Serial.print(" online=");
-      Serial.print(st.online);
-      Serial.print(" running=");
-      Serial.print(st.running);
-      Serial.print(" fault=");
-      Serial.print(st.fault_code);
-      Serial.print(" freq_x10=");
-      Serial.print(st.actual_freq_x10);
-      Serial.print(" speed=");
-      Serial.print(st.actual_speed_raw);
-      Serial.print(" current_x10=");
-      Serial.println(st.output_current_x10);
-
       status_.online = true;
       status_.fault_code = st.fault_code;
       status_.faulted = (st.fault_code != 0);
@@ -234,9 +211,6 @@ bool PumpVfdNode::reset_fault() {
       return true;
     }
 
-    Serial.print("[RST] ");
-    Serial.print(tag);
-    Serial.println(" poll_fail");
     status_.online = false;
     status_.running = false;
     return false;
@@ -257,9 +231,6 @@ bool PumpVfdNode::reset_fault() {
     status_.target_milli_lpm = 0;
     status_.cmd_setpoint_raw = 0;
   }
-
-  Serial.print("[RST] result=");
-  Serial.println(ok && !status_.faulted ? 1 : 0);
 
   return ok && !status_.faulted;
 }

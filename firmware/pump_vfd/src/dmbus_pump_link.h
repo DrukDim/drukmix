@@ -1,5 +1,7 @@
 #pragma once
 #include <stdint.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/portmacro.h>
 
 struct PumpRxCmd {
   bool     valid = false;
@@ -49,6 +51,13 @@ private:
 
   bool peer_known_ = false;
   uint8_t peer_mac_[6] = {0};
+
+  volatile bool reset_pending_ = false;
+  PumpRxCmd reset_rx_{};
+
+  volatile bool rx_pending_ = false;
   PumpRxCmd rx_{};
+
+  portMUX_TYPE rx_mux_ = portMUX_INITIALIZER_UNLOCKED;
   uint8_t proto_ = 1;
 };
