@@ -772,3 +772,87 @@ Any future proposal must answer three questions before code changes start:
 3. What evidence shows a layer is truly redundant rather than just temporarily inconvenient?
 
 If that is not written clearly, the change is not ready.
+
+## Open issue: false pump stop caused by zero-velocity handling semantics
+
+### Confirmed findings
+
+- The problem is not that Moonraker fails to publish `motion_report.live_extruder_velocity`.
+- Direct websocket tests confirmed that Moonraker publishes non-zero extruder velocity during print moves.
+- DrukMix receives those updates too.
+- The real problem is current DrukMix control semantics:
+  - control decisions are still too dependent on the agent loop cadence,
+  - and zero extruder velocity during `print_stats.state=printing` is effectively treated too close to a stop condition.
+
+### Correct control semantics
+
+For this project, the intended semantics are:
+
+- While `print_stats.state=printing` and the print is not paused:
+  - `live_extruder_velocity > 0` means compute and apply pump target normally.
+  - `live_extruder_velocity = 0` means **zero flow command**, not STOP.
+- STOP must be reserved for explicit stop conditions only:
+  - print paused,
+  - print not active,
+  - explicit manual stop,
+  - fault state,
+  - confirmed offline timeout,
+  - flush end / explicit shutdown logic.
+
+In other words:
+
+- `printing + zero velocity` -> `target_pct = 0`, but **do not call backend.stop()**
+- `paused / standby / cancelled / fault / offline timeout` -> real stop is allowed
+
+This matches the physical system better:
+- pump / concrete flow is inertial,
+- zero instantaneous extrusion is not equivalent to a global stop condition,
+- support-flow logic may intentionally maintain minimum delivery even when instantaneous velocity drops to zero.
+
+### Preferred solution direction
+
+Implement **publish-driven / zero-debounce semantics** with minimal changes.
+
+#### Publish-driven rule
+
+When a subscribed Moonraker `notify_status_update` contains `motion_report.live_extruder_velocity`:
+
+- consume that update immediately,
+- update internal Klipper state immediately,
+- if current print state is `printing` and not paused, compute and apply pump target immediately from that publish event,
+- do not wait for a later agent loop tick to make that motion decision.
+
+This avoids losing useful non-zero velocity samples between loop iterations.
+
+#### Zero-debounce rule
+
+During `printing`:
+
+- a zero velocity sample must not trigger `backend.stop()`
+- it must map to zero target only
+- support-flow / minimum-flow behavior should be handled by dedicated flow logic, not by converting zero velocity into stop/pause semantics
+
+### Minimal implementation plan
+
+1. Keep Moonraker subscribe model as-is.
+2. Keep main supervisory loop as-is for:
+   - config reload,
+   - fault handling,
+   - offline supervision,
+   - status logging.
+3. Change motion handling only:
+   - apply velocity-driven control on each relevant `notify_status_update`
+   - remove stop semantics from zero velocity during `printing`
+
+### Fallback option
+
+If publish-driven zero-safe semantics are still insufficient, consider a small **peak latch** as fallback only:
+
+- retain the peak extruder velocity observed inside a short control window,
+- use it to avoid losing short positive bursts.
+
+This is not the preferred first fix.
+Preferred order:
+1. publish-driven immediate apply
+2. zero is not stop during printing
+3. peak latch only if still needed
