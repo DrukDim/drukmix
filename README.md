@@ -88,6 +88,7 @@ Recent live logs show:
 Additional verified compatibility issue:
 - on Moonraker `v0.10.0-10-gfb257f8` / API `1.5.0`, `connection.register_remote_method` is unavailable;
 - DrukMix agent must treat remote-method registration as optional compatibility behavior;
+- Moonraker RPC failures for missing registration support may surface through generic exception wrappers, not only `RuntimeError`;
 - missing remote-method registration must not abort startup.
 
 ### Current observed mismatch

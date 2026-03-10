@@ -281,11 +281,11 @@ class MoonrakerClient:
         ):
             try:
                 await self.call("connection.register_remote_method", {"method_name": m})
-            except RuntimeError as e:
+            except Exception as e:
                 msg = str(e)
                 if "Method not found" in msg or "-32601" in msg:
                     logging.getLogger("drukmix").warning(
-                        "moonraker: connection.register_remote_method unavailable, skip method=%s",
+                        "moonraker: connection.register_remote_method unavailable, skip remote registration starting at method=%s",
                         m,
                     )
                     break
