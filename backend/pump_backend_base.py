@@ -25,7 +25,6 @@ class PumpStatus:
     severity: str = ""
 
     target_pct: Optional[float] = None
-    applied_pct: Optional[float] = None
     telemetry_ok: bool = False
     age_ms: Optional[int] = None
 

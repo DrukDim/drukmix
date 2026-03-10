@@ -64,7 +64,6 @@ class PumpVfdBackend(PumpBackend):
                 pause_print=True,
                 severity="fault",
                 target_pct=self._last_target_pct,
-                applied_pct=None,
                 telemetry_ok=False,
                 age_ms=None,
             )
@@ -99,7 +98,6 @@ class PumpVfdBackend(PumpBackend):
             pause_print=bool(info.pause_print) if info else False,
             severity=(info.severity if info else ""),
             target_pct=self._last_target_pct,
-            applied_pct=raw.get("applied_pct"),
             telemetry_ok=True,
             age_ms=raw.get("age_ms"),
         )

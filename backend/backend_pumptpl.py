@@ -46,7 +46,6 @@ class PumpTplBackend(PumpBackend):
                 faulted=True,
                 fault_code=-1,
                 target_pct=self._last_target_pct,
-                applied_pct=None,
                 telemetry_ok=False,
                 age_ms=None,
             )
@@ -60,7 +59,6 @@ class PumpTplBackend(PumpBackend):
             faulted=False,
             fault_code=0,
             target_pct=self._last_target_pct,
-            applied_pct=raw.get("applied_pct"),
             telemetry_ok=False,
             age_ms=raw.get("age_ms"),
         )

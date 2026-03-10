@@ -394,7 +394,7 @@ def build_status_text(st, cfg: Cfg) -> str:
         f"rev={-1 if st.rev_active is None else int(bool(st.rev_active))} "
         f"fault={int(st.faulted)} code={st.fault_code} "
         f"fault_text={st.fault_text} "
-        f"target_pct={st.target_pct} applied_pct={st.applied_pct} age_ms={st.age_ms} "
+        f"target_pct={st.target_pct} age_ms={st.age_ms} "
         f"max_flow_lpm={cfg.max_flow_lpm} gain_pct={cfg.gain_pct} "
         f"min_print_mms={cfg.min_print_mms} min_flow_pct={cfg.min_flow_pct} hold_s={cfg.min_flow_hold_s}"
     )
@@ -678,7 +678,7 @@ async def run_agent(cfg_path: str):
                 if now - last_log_t >= max(0.2, cfg.log_period_s):
                     last_log_t = now
                     log.info(
-                        "drukmix: backend=%s mode=%s print=%s idle=%s paused=%d klippy=%s vel=%.3f ef=%.3f target_pct=%.2f applied_pct=%s rev=%d link_ok=%d fault=%d code=%d age_ms=%s",
+                        "drukmix: backend=%s mode=%s print=%s idle=%s paused=%d klippy=%s vel=%.3f ef=%.3f target_pct=%.2f rev=%d link_ok=%d fault=%d code=%d age_ms=%s",
                         st.backend,
                         st.control_mode,
                         ks.print_state,
@@ -688,7 +688,6 @@ async def run_agent(cfg_path: str):
                         ks.live_extruder_velocity,
                         ks.extrude_factor,
                         target_pct,
-                        st.applied_pct,
                         int(rev),
                         int(st.link_ok),
                         int(st.faulted),

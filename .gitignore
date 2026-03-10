@@ -1,17 +1,15 @@
-# Python
-.venv/
-__pycache__/
-*.pyc
-
 # macOS
 .DS_Store
 
-# PlatformIO / IDE
-.pio/
-.vscode/
-*.code-workspace
+# Python
+__pycache__/
+*.pyc
+.venv/
+.venv-1/
 
-# Local logs / temp
+# PlatformIO
+.pio/
+
+# Local audit / temp
 *.log
-*.bak
-*.bak.*
+tmp/

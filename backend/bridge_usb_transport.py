@@ -187,13 +187,9 @@ class BridgeUsbTransport:
         pump_online = bool(body[off]); off += 1
         pump_running = bool(body[off]); off += 1
         target_milli_lpm = struct.unpack_from("<i", body, off)[0]; off += 4
-        actual_milli_lpm = struct.unpack_from("<i", body, off)[0]; off += 4
+        _actual_milli_lpm = struct.unpack_from("<i", body, off)[0]; off += 4
         hw_setpoint_raw = struct.unpack_from("<i", body, off)[0]; off += 4
         pump_flags = struct.unpack_from("<H", body, off)[0]; off += 2
-
-        applied_pct = None
-        if pump_max_milli_lpm > 0:
-            applied_pct = max(0.0, min(100.0, (actual_milli_lpm * 100.0) / pump_max_milli_lpm))
 
         return {
             "link_ok": pump_link,
@@ -210,12 +206,10 @@ class BridgeUsbTransport:
             ),
             "faulted": pump_fault_code != 0,
             "fault_code": pump_fault_code,
-            "applied_pct": applied_pct,
             "age_ms": int(last_seen_div10) * 10,
             "pump_state": pump_state,
             "pump_online": pump_online,
             "target_milli_lpm": target_milli_lpm,
-            "actual_milli_lpm": actual_milli_lpm,
             "hw_setpoint_raw": hw_setpoint_raw,
             "pump_flags": pump_flags,
             "last_ack_seq": last_ack_seq,
