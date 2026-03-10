@@ -236,7 +236,6 @@ Examples:
 - fault code
 - running bit
 - reported_target_milli_lpm
-- reported_output_milli_lpm
 - hw_setpoint_raw
 - pump_flags
 
