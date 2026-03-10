@@ -2,815 +2,748 @@
 
 DrukMix is a control stack for a concrete 3D printing system built around Klipper, Moonraker, Mainsail, and external pump/mixer hardware.
 
-The project goal is not a generic plastic FDM workflow. It is focused on a concrete extrusion machine with:
-- screw-based extruder
+This project is **not** a plastic FDM workflow.
+It is for a concrete extrusion machine with:
+- screw extruder
 - screw pump feeding material through a hose
 - external pump driver hardware
-- custom control logic integrated with print execution
+- custom host and firmware control logic
 
-## Project goals
+---
 
-The long-term goal is to build a stable and extensible control stack that can:
-- synchronize pump flow with printing motion
-- support multiple pump driver backends under one common model
-- integrate with Klipper, Moonraker, and Mainsail
-- support operational logic such as flush, prime, hard stop, minimum-flow cutoff, and fault handling
-- remain version-pinned and modifiable without upstream updates breaking local changes
+## Single source of truth rule
 
-## Current architecture
+This `README.md` is the canonical project document.
 
-The project is split into three main layers.
+Rules:
+- all confirmed architectural decisions must be reflected here;
+- all confirmed defects / refactor items must be tracked here;
+- other `docs/*.md` files are supporting references only;
+- if some rule exists in another markdown file but is not reflected here, it is not yet canonical.
 
-### 1. Pump node
-An ESP-based hardware-side node located near the real pump driver.
+This file must distinguish clearly between:
+- **current verified state**
+- **target architecture**
+- **confirmed defects**
+- **refactor constraints**
 
-Responsibilities:
-- receive bus commands
-- validate local operating conditions
-- apply commands to the physical driver
-- generate ACK frames
-- generate STATUS frames
+---
 
-Non-responsibilities:
-- print orchestration
-- flush scheduling
-- Klipper print policy
-- UI logic
+## Project scope
 
-### 2. Bridge
-A USB to ESP-NOW bridge.
+The system must support more than one physical pump backend.
 
-Responsibilities:
-- receive commands from the host
-- forward them to the pump node
-- track ACK timeout and retries
-- expose bridge and pump status back to the host
+Current backend families:
+- `pumpvfd` — VFD-driven pump
+- `pumptpl` — analog / potentiometer / relay style pump control
 
-The bridge should stay transport-oriented and should not accumulate print business logic.
+Future hardware may be added, but upper layers must not become hardcoded to one backend family.
 
-### 3. Agent / host-side control
-The host-side layer that will integrate with Klipper, Moonraker, and Mainsail.
+---
 
-Responsibilities:
+## Current verified state
+
+### Host stack
+Current host stack:
+- Klipper
+- Moonraker
+- Mainsail
+- separate `drukmix` agent service
+
+### Current deployed backend
+Current deployed field path is `pumpvfd`.
+
+### Current host control path
+Current host control chain is:
+
+`Klipper macro -> Moonraker remote method -> DrukMix agent -> backend -> bridge USB protocol -> ESP-NOW bridge -> pump node -> hardware driver`
+
+This path currently works, but is too layered and harder to reason about than desired.
+
+### Current observed issue
+Recent live logs show:
+- intermittent `transport_link_ok=0`
+- repeated `status_age_ms` spikes around offline threshold
+- command path works enough to run/stop the pump
+- telemetry / command acknowledgement shape is still more fragile than desired
+
+### Current observed mismatch
+During manual run testing:
+- run command reaches the pump
+- pump physically runs
+- status still reports `reported_output_pct=0.0`
+- status path therefore does not yet fully represent real applied output
+
+This means command delivery and telemetry truth are not yet equivalent.
+
+---
+
+## Target architecture
+
+The target architecture is:
+
+### 1. Host orchestration layer
+Responsible for:
 - print-state integration
-- flush / prime sequencing
-- unconditional stop logic
-- minimum-flow cutoff
-- synchronization policy
-- UI/state exposure to higher layers
+- flow computation from print motion
+- flush / prime orchestration
+- UI-facing status and operator commands
+- policy decisions such as pause-on-fault / pause-on-offline
 
-## Canonical bus rules
+Must **not** contain backend-specific electrical or transport hacks.
 
-### One abstract pump model
-The system must expose one logical pump abstraction to upper layers.
+### 2. Backend adapter layer
+Responsible for:
+- translating abstract host pump commands into backend-specific actions
+- exposing normalized pump status upward
+- owning backend-specific stop/reset/manual semantics
 
-Different hardware implementations may exist underneath:
-- VFD / Modbus pump
-- TPL / analog + relay pump
-- future drivers
+This is the layer where `pumpvfd` and `pumptpl` are allowed to differ.
 
-Upper layers should not care which pump driver is physically present.
+### 3. Transport layer
+Responsible for:
+- message delivery
+- retries / timeout handling
+- raw transport status
+- no print business logic
 
-### Canonical command set
-Current canonical pump commands:
-- `PUMP_SET_FLOW`
-- `PUMP_SET_MAX_FLOW`
-- `OP_STOP`
-- `OP_RESET_FAULT`
+### 4. Device node layer
+Responsible for:
+- hardware I/O
+- local/manual mode detection
+- safe command execution
+- backend-local fault/reset behavior
+- reporting backend state upward
 
-Optional future commands:
-- `PUMP_PRIME`
-- `PUMP_FLUSH`
+---
 
-### Canonical ACK
-There is one ACK format for pump commands:
+## Canonical invariants
 
-    struct Ack {
-      uint16_t ack_seq;
-      uint8_t  status;
-      uint8_t  reserved;
-      uint16_t err_code;
-      uint16_t detail;
-    };
+These rules must stay true across refactors.
 
-Semantics:
-- `ack_seq` = acknowledged command sequence
-- `status` = normalized result (`ACK_OK`, `ACK_ERROR`, `ACK_BUSY`, `ACK_UNSUPPORTED`)
-- `err_code` = normalized system-level reason
-- `detail` = backend-specific detail or raw driver error information
-
-### Canonical pump status
-There is one canonical runtime pump status type:
-- `PumpStatus`
-
-Canonical `PumpStatus` contains only backend-independent runtime fields:
-- `StatusCommon c`
-- `target_milli_lpm`
-- `max_milli_lpm`
-- `hw_setpoint_raw`
-- `link_flags`
-- `pump_flags`
+### Invariant 1 — abstract pump model first
+Upper layers must talk to one logical pump model, not to a VFD-specific or TPL-specific model.
 
-Versioned duplicates such as `PumpStatusV1`, `PumpStatusV2`, etc. should not be introduced unless there is a hard compatibility requirement.
+### Invariant 2 — backend semantics stay backend-local
+Examples:
+- VFD fault reset timing
+- TPL stop by relay + potentiometer to zero
+- local/manual selector behavior
+- hardware-safe stop sequence
 
-The status model must remain suitable for more than one backend. It must not become permanently VFD-specific.
+These must stay in backend/node logic, not in generic host orchestration.
 
-It must not contain backend-only telemetry such as:
-- VFD frequency
-- VFD motor speed
-- VFD output current
+### Invariant 3 — transport must not own print policy
+Bridge / transport must not own:
+- print pause policy
+- flush policy
+- slicer semantics
+- minimum flow logic
+- print state logic
 
-## Manual / local mode rule
+### Invariant 4 — telemetry must represent reality
+A command is not enough.
+The system must distinguish between:
+- requested target
+- delivered command
+- actual device-reported state
 
-Manual or local override is a core part of the system model.
-
-If local/manual control is active:
-- remote run commands must not be treated as normal run commands
-- the node should report rejection through ACK
-- the current manual/local state must be visible in status
-
-This rule is required for:
-- VFD-based pump control with a local selector/toggle
-- future TPL/relay-based pump control with manual override inputs
-
-## RS485 note
-
-The current RS485 design uses shared `DE/RE` on one control pin.
+### Invariant 5 — no permanent VFD bias in canonical model
+The canonical model must not assume:
+- Modbus-only reset
+- VFD-only fault fields
+- VFD-only stop semantics
+- VFD-only telemetry fields
 
-This is acceptable for half-duplex operation as long as:
-- TX mode is enabled before transmission
-- the UART is flushed before switching back to RX
-- turnaround timing is handled correctly
-
-Shared `DE/RE` is not itself a blocker for receiving feedback from the VFD.
-
-## Current direction
-
-The project should avoid overgrowing the transport layer.
-
-Target shape:
-- one abstract pump model
-- one ACK model
-- one `PumpStatus` model
-- bridge remains simple
-- agent becomes the intelligent coordination layer
-
-## What not to do
-
-Do not:
-- duplicate status structures without necessity
-- move print business logic into the bridge
-- let transport details dictate the whole architecture
-- make the bus permanently specific to only one pump backend
-
-## Canonical pump command semantics
-
-The canonical host-visible pump command behavior is:
-
-### `PUMP_SET_FLOW`
-Purpose:
-- request a pump flow target in `milli_lpm`
-
-Rules:
-- `target_milli_lpm > 0` means normal remote pumping request
-- `target_milli_lpm <= 0` is not the preferred hard-stop command; it may be treated as a stop-equivalent by a backend, but host orchestration should prefer explicit stop semantics
-- command acceptance must depend on current node state, hardware readiness, and local/manual override state
-- backend-specific low-level actuation is private to the node
-
-ACK expectations:
-- `ACK_OK` when the command is accepted for execution
-- `ACK_ERROR` when the command is rejected due to local/manual mode, hardware not ready, invalid parameter, or backend failure
-- `detail` should carry backend-specific reason when useful
-
-### `PUMP_SET_MAX_FLOW`
-Purpose:
-- configure the current maximum allowed pump flow envelope for the active backend
-
-Rules:
-- this is a configuration/control bound, not a direct run command
-- it must be backend-independent at the interface level even if internal implementation differs
-
-### `OP_STOP`
-Purpose:
-- explicit unconditional remote-controlled stop request
-
-Rules:
-- this is the canonical stop command
-- host-side print logic should prefer `OP_STOP` over overloading `PUMP_SET_FLOW=0`
-- node must apply the safest supported stop behavior for the backend
-- stop behavior may be ramp stop, controlled stop, or immediate safe stop depending on hardware/backend policy
-
-### `OP_RESET_FAULT`
-Purpose:
-- request fault reset when the backend supports it
-
-Rules:
-- acceptance depends on backend capability and current state
-- unsupported backends should reject with normalized ACK semantics
-
-## Manual / local override semantics
-
-Manual or local override must be treated as a first-class control condition.
-
-### Required behavior
-If manual/local mode is active:
-- remote flow/run commands must not be executed as normal run commands
-- node must report rejection through ACK
-- status must clearly show manual/local condition
-- host layer must treat the pump as not remotely controllable until manual/local mode clears
-
-### ACK behavior under manual/local override
-Recommended normalized behavior:
-- `status = ACK_ERROR`
-- `err_code = ERR_BAD_STATE` or a dedicated future normalized code if added later
-- `detail = backend-specific reason`
-- pump fault/status model may also expose `FAULT_PUMP_MANUAL_MODE` where appropriate
-
-### Status behavior under manual/local override
-Manual/local state must be visible through the canonical status model using flags rather than backend-specific transport hacks:
-- `PUMP_FLAG_MANUAL_MODE`
-- `PUMP_FLAG_REMOTE_MODE`
-
-Only one control authority should be considered active at a time.
-
-## Layer responsibility matrix
-
-### Pump node responsibilities
-The pump node is responsible for:
-- backend I/O
-- hardware state validation
-- manual/local input evaluation
-- safe command application
-- generation of canonical ACK
-- generation of canonical `PumpStatus`
-
-The pump node is not responsible for:
-- print orchestration
-- flush planning
-- long host-side state machines
-- UI policy
-
-### Bridge responsibilities
-The bridge is responsible for:
-- host transport termination
-- ESP-NOW forwarding
-- retry / timeout handling
-- exposing bridge-visible status to the host
-
-The bridge is not responsible for:
-- print business logic
-- backend-specific pump policy
-- flush or prime sequencing
-- interpreting print intent
-
-### Agent responsibilities
-The agent is responsible for:
-- print-linked pump orchestration
-- synchronization with Klipper state
-- flush / prime sequencing
-- unconditional stop policy
-- minimum-flow cutoff policy
-- watchdog policy above transport level
-- exposing a clean model to Moonraker / Mainsail
-
-## Agent state machine goals
-
-The host-side agent should evolve toward a small explicit state machine.
-
-Suggested high-level states:
-- `DISCONNECTED`
-- `IDLE`
-- `ARMED`
-- `RUNNING`
-- `FLUSHING`
-- `STOPPING`
-- `FAULT`
-- `MANUAL_LOCKOUT`
-
-Required transitions should cover:
-- print start / print stop
-- commanded flow becoming positive
-- commanded flow dropping below minimum threshold
-- manual/local override appearing or clearing
-- communication loss
-- backend fault
-- unconditional emergency stop
-
-The agent should become the only place where print-time business logic is coordinated.
-
-## Immediate next milestone
-
-The next design focus should be:
-1. finalize minimal canonical pump semantics shared by VFD and TPL backends
-2. define host-side state machine for print-linked pump control
-3. integrate that model with Klipper, Moonraker, and Mainsail
-
-The project should now prioritize system behavior over further transport-layer complexity.
-
-## Minimal shared pump runtime model
-
-The minimal shared runtime model must work for both:
-- VFD / Modbus pump backend
-- TPL / relay + analog backend
-
-This means the canonical model must describe pump behavior, not driver internals.
-
-### Canonical `PumpStatus` meaning
-
-`PumpStatus` should represent only shared runtime state that higher layers need for orchestration.
-
-Recommended shared fields:
-- `StatusCommon c`
-- `target_milli_lpm`
-- `max_milli_lpm`
-- `hw_setpoint_raw`
-- `link_flags`
-- `pump_flags`
-
-### Meaning of shared fields
-
-- `target_milli_lpm` = commanded target flow from the remote control layer
-- real delivered flow is currently **not exposed as a canonical host-visible field** because there is no independent flow sensor yet
-- `max_milli_lpm` = active configured upper limit
-- `hw_setpoint_raw` = backend raw actuation value, exposed only as a generic debug/control field
-- `link_flags` = communication and transport visibility flags
-- `pump_flags` = logical runtime flags such as running, manual mode, remote mode, watchdog stop, hardware ready
-
-### What belongs in `pump_flags`
-
-`pump_flags` should carry shared logical conditions, for example:
-- `PUMP_FLAG_RUNNING`
-- `PUMP_FLAG_FORWARD`
-- `PUMP_FLAG_REVERSE`
-- `PUMP_FLAG_MANUAL_MODE`
-- `PUMP_FLAG_REMOTE_MODE`
-- `PUMP_FLAG_FAULT_LATCHED`
-- `PUMP_FLAG_WDOG_STOP`
-- `PUMP_FLAG_HW_READY`
-
-### What does NOT belong in canonical `PumpStatus`
-
-The canonical shared status should not directly depend on one backend family.
-
-Examples that should not live in canonical `PumpStatus`:
-- VFD output frequency
-- VFD shaft speed
-- VFD output current
-- TPL-specific relay diagnostics
-- TPL-specific potentiometer raw value
-- backend-private hardware diagnostics
-
-Those values may still exist, but they should be treated as backend diagnostics, not canonical pump state.
-
-## Backend diagnostics rule
-
-Backend-specific diagnostics are allowed, but they must be clearly separated from the shared control model.
+### Invariant 6 — no hidden behavior outside README
+If a project rule matters for development decisions, it must be written here.
+
+---
+
+## Canonical control model
+
+Upper layers should think in these concepts:
+
+- set flow target
+- stop
+- reset fault
+- read normalized status
+- detect local/manual mode
+- detect offline / stale telemetry
+- detect backend faulted state
+
+The canonical model is about behavior, not about one specific wire protocol.
+
+
+### Command ownership model
+
+The system must distinguish command ownership by layer.
+
+#### 1. Operator intent
+Examples:
+- stop
+- reset fault
+- flush
+- gain / limits / calibration-style commands
+
+These commands originate from macros / remote methods / operator actions.
+
+#### 2. Host orchestration command
+For AUTO pumping, host orchestration computes an abstract motion-derived command from print state.
+
+Current computed fields in host core are:
+- `target_pct`
+- `rev`
+- `stop`
+- `reason`
+
+This layer owns print-driven intent, not backend transport details.
+
+#### 3. Backend command
+Backend adapter translates abstract host command into backend-specific action.
 
 Examples:
-- VFD diagnostics:
-  - actual frequency
-  - motor speed
-  - output current
-  - raw drive fault register
-- TPL diagnostics:
-  - relay state
-  - selector state
-  - analog command value
-  - backend-specific fault inputs
+- `pumpvfd`: run/stop/reset over VFD path
+- `pumptpl`: relay / potentiometer / backend-specific safe stop sequence
 
-These diagnostics should not drive the project architecture.
-They are secondary to the shared pump abstraction.
+#### 4. Transport command
+Transport layer converts backend command into delivery packets / frames / retries.
 
-## Design consequence for next code changes
+This layer owns:
+- packet type
+- sequence / acknowledgement transport
+- CRC / framing
+- link retry behavior
 
-Before adding more fields or transport payloads, check them against this rule:
-
-Question:
-- does this field describe shared pump behavior needed by host orchestration?
+This layer must not reinterpret print intent.
 
-If yes:
-- it may belong in canonical `PumpStatus`
+#### 5. Device action
+Device node performs hardware action and reports device-side state.
 
-If no:
-- it should stay backend-local or move into an optional diagnostics path later
+### Status ownership model
 
-## Printer deployment workflow
+The system must distinguish status ownership by layer.
 
-Canonical printer-side layout:
+#### 1. Device fact
+Raw device/backend fact reported by node or hardware-facing firmware.
 
-- repo: `/home/dan/drukmix`
-- agent entrypoint: `/home/dan/drukmix/agent/drukmix_agent.py`
-- live cfg: `/home/dan/printer_data/config/drukmix.cfg`
-- live macros: `/home/dan/printer_data/config/drukmix_macros.cfg`
-- systemd unit: `/etc/systemd/system/drukmix.service`
+Examples:
+- fault code
+- running bit
+- reported_target_milli_lpm
+- reported_output_milli_lpm
+- hw_setpoint_raw
+- pump_flags
 
-Deployment helper:
+#### 2. Transport status
+Bridge/transport-visible status about delivery and freshness.
 
-- `tools/drukmix`
-- install to `/usr/local/bin/drukmix`
-- normal update flow on printer:
-  - `drukmix fetch`
-  - `drukmix apply`
-  - `drukmix klipper-restart`
+Examples:
+- `transport_link_ok`
+- `last_ack_seq`
+- `retry_count`
+- `send_fail_count`
+- `status_age_ms`
+- transport-visible stale/offline condition
 
-During bring-up/debug printer-side changes may be captured back into repo:
+#### 3. Backend-normalized status
+Backend adapter converts raw transport/device state into normalized backend status.
 
-- `drukmix capture`
-- `drukmix publish "message"`
+This is where:
+- backend fault mapping
+- manual/remote interpretation
+- normalized running/fault/manual/offline state
+belong.
 
-Rule:
-- repo remains canonical source of truth
-- `capture/publish` are allowed only as controlled debugging workflow, not as a second architecture
-
-## VFD architecture and docs
-
-### Where to look first
-
-- `docs/vfd/README.md` — index: what document to open and when
-- `docs/vfd/m900_m980_shared_semantics.md` — shared semantics for M900/M980
-- `docs/vfd/m900_m980_differences.md` — series differences and capability boundary
-- `docs/vfd/m900_m980_faults.md` — baseline fault map and recovery policy
-- `docs/vfd/modbus_driver_contract.md` — contract between `pump_vfd`, `bridge`, `agent`, and future Klipper integration
-- `config/vfd_profiles.yaml` — per-series profiles/capabilities
-
-### Project rules for VFD fault handling
-
-- Only communication-loss class faults are candidates for automatic recovery.
-- All other VFD faults must remain operator-visible and should pause/hold the print flow until investigated.
-- Fault recovery policy should live on the ESP / `pump_vfd` side, not in an external host service.
-- `running` must not be interpreted as proof of physical shaft motion when commanded frequency is zero.
-- Shared transport/status logic may be reused across M900 and M980, but series differences must stay in profiles/capabilities.
-
-### Current implementation direction
-
-1. Keep common Modbus transport and status model.
-2. Move comm-loss recovery to ESP-side logic.
-3. Preserve operator-handled behavior for all non-communication faults.
-4. Validate real run behavior using different target speeds and observed status registers before deeper Klipper integration.
-
-
-## Firmware
-
-### Pump VFD baseline
-
-Станом на зараз baseline для `firmware/pump_vfd` такий:
-
-- Для поточного стенду з M980 підтверджений робочий `reset_fault()` path:
-  - `REG_CMD_CONTROL (0x0002) = 6`  -> stop
-  - `REG_CMD_CONTROL (0x0002) = 7`  -> reset fault
-  - `REG_CMD_CONTROL (0x0002) = 6`  -> stop
-- Тобто робочий baseline reset fault для цього стенду — саме `stop -> reset -> stop`.
-- Спрощений варіант з одним write `0x0002 = 7` не вважати baseline для цього стенду, поки він не підтверджений окремим live тестом.
-- Висновки про reset/fault логіку дозволено робити тільки після повного deployment sequence:
-  - source change
-  - `rm -rf firmware/pump_vfd/.pio` (коли є сумніви або мінялась fault/reset/debug логіка)
-  - `cd firmware/pump_vfd && pio run`
-  - `cd ../.. && ./tools/export_firmware.sh`
-  - `./tools/flash_firmware.sh pump_vfd <port> <baud>`
-  - live verification через monitor і команди з bridge
-- Не змішувати monitor і direct host commands в один і той самий serial port pump node.
-- Якщо `pio device monitor` відкритий на pump ESP, агентом у той самий `/dev/cu.usbserial-*` порт не ходити.
-
-### Fixed checklist
-
-Правило:
-- не змінювати список довільно
-- додавати тільки підтверджені пункти
-- прибирати пункт тільки після явного підтвердження live-перевіркою
-
-Список:
-- [x] Знайдено робочий fault reset path для поточного M980: `stop -> reset -> stop` (live verified on hardware)
-- [x] Підтверджено правильний deployment sequence для `pump_vfd`: `rebuild -> export -> flash -> live verify`
-- [x] Уточнити правильну семантику `running` для M980; live-підтверджено: `running = (freq>0) or (speed!=0) or (current>0)`, а `RUN_STATE` не вважати ознакою фізичного руху
-- [ ] Дочистити bridge ACK/retry semantics
-- [x] Перевірити та прибрати дублювання reset command/retry path; live-підтверджено isolated test: один `OP_RESET_FAULT`, один ACK, без повторної resend-посилки
-- [ ] Після стабілізації прибрати зайвий debug/test code
-- [ ] Зробити clean architecture pass і прибрати застарілі/суперечливі baseline notes
-
-
-### Verified M980 live behavior
-
-### Verified bridge reset propagation
-
-Підтверджено live end-to-end:
-
-- isolated test виконувати тільки при зупиненому `drukmix.service`
-- monitor на pump node показав один `OP_RESET_FAULT`
-- `last_ack_seq` на bridge змінився рівно на один для reset-команди
-- після `sleep 3` host-side `ping` показує:
-  - `pump_fault_code = 0`
-  - `pump_state = 3`
-  - `pump_running = false`
-
-Висновок:
-- reset fault зараз підтверджений не тільки локально на `pump_vfd`, а й наскрізно через `bridge -> esp-now -> pump_vfd -> status back to host`
-- для перевірки reset-path правильний тест тільки isolated:
-  - `sudo systemctl stop drukmix.service`
-  - `ping`
-  - `reset-fault`
-  - `sleep 3`
-  - `ping`
-
-
-Підтверджено live на стенді:
-
-- До reset:
-  - `fault=16`
-  - `running=0`
-  - `freq_x10=0`
-  - `speed=0`
-  - `current_x10=0`
-- Робочий reset sequence:
-  - `0x0002 = 6`
-  - `0x0002 = 7`
-  - `0x0002 = 6`
-- Після reset:
-  - `fault=0`
-  - `running=0`
-  - `freq_x10=0`
-  - `speed=0`
-  - `current_x10=0`
-
-Висновок:
-- для M980 `RUN_STATE (0x1000)` не використовувати як ознаку фізичного руху
-- для DrukMix `running` рахувати від фактичних telemetry-полів:
-  - `actual_freq_x10 > 0`
-  - або `actual_speed_raw != 0`
-  - або `output_current_x10 > 0`
-
-### Bridge baseline
-
-- `firmware/bridge` зараз не чіпаємо без окремої причини.
-- Поточна проблема локалізована в `pump_vfd`, не в bridge.
-
-
-## Agent architecture findings and refactor boundary
-
-Поточний `drukmix_agent.py` фактично змішує 4 різні шари в одному файлі:
-
-1. TPL-specific semantics
-2. host orchestration
-3. Moonraker integration
-4. bridge transport
-
-Це означає, що current agent зараз не є чистим універсальним orchestration layer.
-У ньому одночасно живуть:
-- логіка друку і синхронізації потоку
-- старі TPL-специфічні правила
-- Moonraker websocket / remote methods
-- USB framing / bridge transport details
-
-### Main architectural risk
-
-Головний ризик подальших змін:
-- адаптувати agent під VFD / dmbus
-- але залишити старі TPL-specific механіки всередині того ж шару
-- і далі компенсувати різницю новими умовами та хакaми
-
-Це створить важкий змішаний host-side код, який:
-- складно підтримувати
-- складно дебажити
-- може створювати зайве навантаження на CB1 / host system
-- погано масштабується на нові device types
-
-### Confirmed current agent layering
-
-#### 1. TPL-specific semantics
-У current agent присутні TPL-oriented маркери та логіка, які не можна вважати generic host abstraction:
-
-- `EF_MANUAL_FWD`
-- `EF_MANUAL_REV`
-- `EF_AUTO_ALLOWED`
-- `EF_AUTO_ACTIVE`
-- `EF_DIR_ASSERTED`
-- `EF_WIPER_TPL`
-- `decode_mode()`
-- `expected_code()`
-- `confirm_applied()`
-
-Висновок:
-- ці частини не повинні залишатися всередині generic agent core
-- їх треба або винести в окремий TPL-specific compatibility layer, або зберегти лише як legacy reference
-
-#### 2. Host orchestration
-У current agent already lives valid host-side orchestration logic:
-
-- print-state-dependent pumping
-- flow-from-motion logic через `live_extruder_velocity`
-- `flow_gain`
-- `retract_deadband_mm_s`
-- `retract_gain`
-- `min_run_lpm`
-- `min_run_hold_s`
-- `drukmix_flush`
-- `drukmix_flush_stop`
-- pause policy:
-  - `pause_on_pump_offline`
-  - `pause_on_manual_during_print`
-- `pause_with_popup()`
-
-Висновок:
-- саме цей шар і є правильною відповідальністю host agent
-- його не треба пхати в bridge або в device node
-- але його треба відокремити від transport/details/backend-specific logic
-
-#### 3. Moonraker integration
-У current agent є окремий Moonraker-facing шар:
-
-- `MoonrakerClient`
-- `connection.register_remote_method`
-- `printer.objects.subscribe`
-- `notify_status_update`
-- `printer.print.pause`
-- `RESPOND TYPE=...`
-
-Висновок:
-- це окремий integration layer
-- він не повинен бути змішаний з bus/device semantics
-- він має адаптувати Moonraker state до internal host model, а не нести backend-specific control logic
-
-#### 4. Bridge transport
-У current agent є окремий transport/glue layer:
-
-- `BridgeSerial`
-- `build_usb_packet()`
-- `parse_bridge_status()`
-- `USB_SET_FLOW`
-- `USB_SET_MAXLPM`
-- `USB_BRIDGE_STATUS`
-
-Висновок:
-- packet framing / COBS / CRC / bridge serial transport не повинні змішуватися з orchestration core
-- transport треба тримати окремим адаптером
-
-## Preserved TPL legacy snapshot
-
-Щоб не втратити стару TPL host logic перед refactor, у repo збережено окремий archival snapshot:
-
-- `agent/legacy_tlp/drukmix_agent_tlp_legacy.py`
-- `agent/legacy_tlp/drukmix_cfg_tlp_legacy.cfg`
-- `agent/legacy_tlp/drukmix_macros_tlp_legacy.cfg`
-- `docs/agent/tpl_legacy_snapshot.md`
-
-Правило:
-- цей snapshot є reference-only
-- його не refactor'ити inplace
-- він збережений як джерело поведінкової семантики TPL для майбутньої інтеграції
-
-## Current agent gaps already identified
-
-У current `drukmix_agent.py` already видно розрив між macro/API surface та реальною реалізацією.
-
-Поточні gaps:
-
-- `drukmix_set_limits` відсутній
-- `drukmix_clear_overrides` відсутній
-- `USB_RESET_FAULT` відсутній
-- `reset_fault` path відсутній
-
-Висновок:
-- current agent уже не повністю узгоджений з macros/config expectations
-- не можна безконтрольно нашаровувати нові можливості поверх цього стану
-- спочатку потрібне чітке розділення шарів
-
-## DMBus scope rule
-
-`dmbus v1` is the current canonical baseline for device communication.
-
-Його мета:
-
-- common command transport
-- common ACK semantics
-- common device status model
-- common node-to-host abstraction
-
-`dmbus v1` is not required to encode the entire product workflow.
-
-Higher-level behavior may still live above the bus, for example:
-
-- FLUSH orchestration
-- pause policy on faults
-- unconditional stop policy
-- override persistence
-- print-state-dependent actions
-
-If `dmbus v1` later proves insufficient for stable multi-device orchestration:
-
-- introducing `dmbus v2` is allowed
-- but only after stabilizing the current `v1` baseline
-- do not compensate protocol gaps with uncontrolled Python-side hacks
-
-## Moonraker / Mainsail integration rule
-
-Long-term integration must not stop at macro buttons only.
+#### 4. Host orchestration context
+Host combines normalized backend status with print context.
+
+Examples:
+- printing / paused / idle state
+- extrude factor
+- live extruder velocity
+- pause-on-fault policy
+- pause-on-offline policy
+
+#### 5. UI/operator status
+Final operator-visible state shown in logs / notifications / UI.
+
+This layer may summarize lower layers, but must not destroy field meaning.
+
+### Field truth rule
+
+Every important status field must be classified explicitly as one of:
+
+- `requested`
+- `delivered`
+- `acknowledged`
+- `backend_reported`
+- `measured`
+- `stale`
+
+The current architecture must not use one field as a silent substitute for another.
+
+### Current confirmed semantic mismatch
+
+The current `pumpvfd` path already shows a field-truth mismatch:
+
+- backend keeps `target_pct` as last requested target;
+- host-visible `reported_output_pct` is derived from `reported_output_milli_lpm`;
+- physical pump motion may already exist while `reported_output_pct` still reports `0.0`.
+
+Therefore current telemetry does not yet cleanly distinguish:
+- requested target
+- delivered backend command
+- actual backend-reported output
+- real physical output
+
+This mismatch must be resolved before architecture simplification touches status semantics.
+
+### Current confirmed simplification target
+
+The main simplification target is not “remove layers blindly”.
+
+It is:
+- remove duplicate reinterpretation of the same command;
+- remove duplicate reinterpretation of the same status;
+- keep exactly one owner for each meaning;
+- preserve backend-local safety semantics while reducing translation count.
+
+
+### Current field classification snapshot
+
+Current field classification for the active `pumpvfd` path:
+
+#### Host-orchestration requested
+- `CoreOutput.target_pct`
+- `CoreOutput.rev`
+- `CoreOutput.stop`
+- `CoreOutput.reason`
+- `PumpVfdBackend._last_target_pct`
+- `PumpStatus.target_pct`
+
+Meaning:
+- host-requested command intent
+- not proof of delivery
+- not proof of backend application
+- not proof of physical output
+
+#### Transport delivery / acknowledgement
+- outgoing `USB_SET_FLOW(cmd_target_milli_lpm, flags)`
+- `last_ack_seq`
+- `retry_count`
+- `send_fail_count`
+- `seq_reply`
+
+Meaning:
+- transport-layer delivery / acknowledgement state
+- not direct proof of backend-reported output
+- not physical output
+
+#### Freshness / stale / link state
+- `transport_link_ok`
+- `status_age_ms`
+- cached status presence / absence
+
+Meaning:
+- freshness and communication visibility
+- not pump-flow truth
+
+#### Backend-reported device state
+- `fault_code`
+- `pump_state`
+- `pump_online`
+- `reported_running`
+- `rev_active`
+- `control_mode`
+- `reported_target_milli_lpm`
+- `reported_output_milli_lpm`
+- `hw_setpoint_raw`
+- `pump_flags`
+- `applied_code`
+- `pump_max_milli_lpm`
+
+Meaning:
+- device/backend-reported state or backend-normalized device state
+- may still differ from real physical output
+
+#### Backend-reported derived field
+- `reported_output_pct`
+
+Meaning:
+- derived from `reported_output_milli_lpm / pump_max_milli_lpm`
+- not measured physical output
+- must not be treated as proof that the pump is or is not physically moving
+
+### Current missing truth layer
+
+The current active path does not expose a separate canonical field for:
+- real physical output confirmation
+- measured screw/pump motion
+- independently measured delivered flow
+
+Therefore current architecture must not treat:
+- `target_pct`
+- `last_ack_seq`
+- `reported_running`
+- `reported_output_pct`
+
+as interchangeable truth.
+
+
+### Rename / semantics clarification plan
+
+This plan is for naming cleanup only.
+It must preserve current behavior until each rename is implemented and verified.
+
+#### 1. `reported_output_pct`
+Current owner:
+- transport/backend-derived field
+
+Current truth class:
+- `backend_reported` derived field
+
+Current source:
+- derived from `reported_output_milli_lpm / pump_max_milli_lpm`
+
+Problem:
+- name sounds like “command was applied”
+- can be misread as physical-output truth
+- can be misread as delivery confirmation
 
 Target direction:
+- rename to one of:
+  - `reported_output_pct`
+  - `derived_output_pct`
+  - `backend_output_pct`
 
-- pump state should be exposed as structured device/status data through Moonraker-facing integration
-- Mainsail should be able to render pump/device tiles from structured state, not only from ad-hoc macros
-- macros remain valid for operator actions, but must not be the only UI/control surface
+Rule:
+- new name must explicitly imply derived/backend-reported meaning
+- must not imply measured physical output
+- must not imply delivery acknowledgement
 
-## Multi-device scaling rule
+#### 2. `target_pct`
+Current owner:
+- host orchestration / backend wrapper
 
-This project is expected to grow beyond one pump backend.
+Current truth class:
+- `requested`
 
-Future devices may include:
+Current source:
+- `CoreOutput.target_pct`
+- `PumpVfdBackend._last_target_pct`
+- `PumpStatus.target_pct`
 
-- mixers
-- feeders / unloaders
-- silos
-- pressure sensors
-- temperature / humidity sensors
-- RPM / rotation feedback devices
+Problem:
+- current name is short but not explicit enough in operator/debug context
+- can be confused with delivered or applied backend command
 
-Therefore:
+Target direction:
+- keep internal short form if needed
+- operator/debug-facing naming should move toward:
+  - `requested_target_pct`
+  - or `host_target_pct`
 
-- current architecture must scale to multiple external ESP32-based device nodes
-- shared bus and shared host abstractions are needed not only for VFD vs TPL, but for the future device family as a whole
-- avoid host-side designs that assume only one permanent pump-specific path
+Rule:
+- this field means requested host intent only
+- it is not delivery proof
+- it is not backend-applied proof
+- it is not physical-output proof
 
-## Host vs ESP responsibility rule
+#### 3. `running`
+Current owner:
+- backend-normalized status using device/backend input
 
-Maximum reasonable low-level logic should be moved out of the host and into external ESP32 device nodes.
+Current truth class:
+- `backend_reported`
 
-### Device node should own:
-- hardware I/O
-- backend-specific actuation
-- local safety handling
-- local/manual input handling
-- backend-specific diagnostics
-- canonical ACK generation
-- canonical STATUS generation
+Current source:
+- currently sourced from backend/device status path
 
-### Bridge should own:
-- transport only
-- forwarding
-- retry / timeout
-- compact host-visible status transport
+Problem:
+- name is too broad
+- can be misread as physical pumping truth
+- can be misread as operator-visible “material is flowing”
 
-### Host agent should own:
-- print orchestration
-- motion-to-flow mapping
-- FLUSH / PRIME sequencing
-- pause / hold policy
-- override lifecycle
-- Moonraker / Mainsail integration
-- multi-device coordination at workflow level
+Target direction:
+- split or rename depending on final model:
+  - `backend_running`
+  - `reported_running`
+  - `device_running_state`
 
-Висновок:
-- current architectural direction with external ESP32 nodes is correct
-- host should become lighter, not heavier
-- CB1-side logic should stay orchestration-oriented, not hardware-protocol-heavy
+Rule:
+- if this field remains singular, its meaning must be fixed explicitly
+- it must not silently mean physical-output confirmation
 
-## Current refactor boundary
+#### 4. `transport_link_ok`
+Current owner:
+- transport status
 
-До тих пір, поки насос не буде синхронно крутитися на реальному принтері під час запуску файлу, не робити "cleanups for beauty".
+Current truth class:
+- `stale` / freshness / communication visibility
 
-Поточний дозволений refactor boundary:
+Problem:
+- can be over-read as “pump state is valid”
+- can be confused with backend-online truth
 
-1. preserve legacy behavior references
-2. separate current agent into clearer layers
-3. avoid losing TPL behavior knowledge
-4. do not add uncontrolled compatibility hacks
-5. do not redesign protocol prematurely before live synchronized printing works
+Target direction:
+- keep if convenient, but document clearly as transport visibility only
+- possible future explicit names:
+  - `transport_link_ok`
+  - `status_link_ok`
 
-## Refactor order rule
+Rule:
+- this field says communication visibility/freshness only
+- it does not prove pump stop/run/output truth
 
-Перші 3 напрямки відділення в agent мають бути саме такі:
+#### 5. `status_age_ms`
+Current owner:
+- transport freshness status
 
-### Step 1 — isolate TPL-specific semantics
-Перше, що треба відділити:
-- TPL-specific flags
-- TPL-specific mode decoding
-- TPL-specific applied-code/confirm semantics
+Current truth class:
+- `stale`
 
-### Step 2 — isolate bridge transport
-Далі треба відділити:
-- USB framing
-- COBS/CRC packet handling
-- bridge serial transport API
+Problem:
+- currently useful, but easy to ignore semantically
+- without naming context it can be mixed into device truth
 
-### Step 3 — isolate Moonraker adapter
-Далі треба відділити:
-- websocket RPC
-- remote methods
-- object subscriptions
-- UI/respond/pause bridge to Moonraker
+Target direction:
+- keep or rename to:
+  - `status_age_ms`
+  - `transport_status_age_ms`
 
-Після цього вже можна чисто формувати:
+Rule:
+- this field describes status freshness only
+- it is not a flow/output/device-actuation field
 
-- generic host orchestration core
-- TPL compatibility layer
-- VFD/dmbus path
-- future multi-device integrations
+#### 6. `reported_target_milli_lpm`
+Current owner:
+- backend/device-reported state
 
-## Current working conclusion
+Current truth class:
+- `backend_reported`
 
-Поточний вибір напряму вважається правильним:
+Problem:
+- can be confused with host-requested flow target
+- transport/backend/device layers may each mean different “target”
 
-- `dmbus` варто продовжувати
-- максимум low-level logic варто виносити на ESP32
-- host agent має залишатися orchestration layer
-- TPL legacy behavior треба зберегти як reference
-- refactor має бути контрольований, без втрати поточної працездатності та без "костиль за костилем"
+Target direction:
+- distinguish clearly from host intent:
+  - `backend_reported_target_milli_lpm`
+  - or `reported_reported_target_milli_lpm`
 
+Rule:
+- if host also owns target-flow naming, host and backend names must not collide semantically
+
+#### 7. `reported_output_milli_lpm`
+Current owner:
+- backend/device-reported state
+
+Current truth class:
+- `backend_reported`
+
+Problem:
+- word `actual` sounds stronger than current proof level
+- may still be reported/estimated device value, not independently measured real output
+
+Target direction:
+- rename toward:
+  - `reported_output_milli_lpm`
+  - `backend_output_milli_lpm`
+
+Rule:
+- unless there is an independent sensor, this field must not imply physical measured truth
+
+#### 8. `hw_setpoint_raw`
+Current owner:
+- backend/device-reported state
+
+Current truth class:
+- `backend_reported`
+
+Problem:
+- name is debug-like but acceptable
+- meaning should stay clearly backend/device-local
+
+Target direction:
+- keep as backend/debug field unless a better backend-neutral raw-actuation name appears
+
+Rule:
+- do not surface this as canonical physical-output truth
+
+### Rename rollout rule
+
+Renames must be implemented in this order:
+
+1. document field meaning in README
+2. rename backend/internal fields
+3. rename operator-visible/log fields
+4. verify no old meaning leaks through logs/UI/macros
+5. only then remove legacy aliases if any are used temporarily
+
+### Minimum first rename target
+
+The first rename target should be:
+
+- `applied_pct` -> `reported_output_pct`
+
+Reason:
+- it is currently the most misleading field name
+- it directly collides with field-truth rules already documented above
+
+---
+
+## Backend matrix
+
+### `pumpvfd`
+Nature:
+- remote-controlled VFD backend
+- currently active deployment path
+
+Important backend-local semantics:
+- fault reset behavior matters;
+- Err16 handling matters;
+- status currently includes VFD-related fault mapping;
+- command path works, but telemetry truth still needs work.
+
+### `pumptpl`
+Nature:
+- analog / digital potentiometer + relay style backend
+
+Important backend-local semantics:
+- stop is backend-specific;
+- safe stop may require relay action and setpoint-to-zero sequence;
+- VFD-style reset semantics do **not** automatically apply;
+- VFD assumptions must not leak into TPL logic.
+
+### Future backends
+Any future backend must implement the same abstract host-visible model, while keeping its low-level semantics local to the backend.
+
+---
+
+## Manual / local override rule
+
+Manual / local override is first-class system state.
+
+Rules:
+- if local/manual mode is active, remote motion commands must not be treated as normal accepted control;
+- local/manual state must be visible in normalized status;
+- host must treat backend as not fully remotely controllable until the condition clears;
+- exact implementation may differ by backend.
+
+This rule applies both to:
+- VFD selector / local mode cases
+- TPL or future hardware local override designs
+
+---
+
+## Current confirmed defects / checklist
+
+Only confirmed items belong here.
+
+### Active checklist
+
+- [x] Normalize README so it is the single source of truth for architecture, current state, and refactor constraints.
+- [x] Remove accidental VFD-overfitting from canonical project description.
+- [x] Make backend boundaries explicit: generic host logic vs backend-specific logic.
+- [x] Define command ownership and status ownership by layer.
+- [x] Define field-truth categories for operator-visible status semantics.
+- [ ] Reconcile command success with telemetry truth; current system can physically run while normalized telemetry still reports zero applied output.
+- [ ] Audit bridge / pump status path for stale or delayed telemetry.
+- [ ] Audit why `transport_link_ok` intermittently drops during otherwise idle/healthy operation.
+- [ ] Classify current operator-visible fields as `requested`, `delivered`, `acknowledged`, `backend_reported`, `measured`, or `stale`.
+- [ ] Separate requested target, delivered command, backend-reported output, and real physical output in naming and architecture.
+- [x] Rename misleading field `applied_pct` to `reported_output_pct` so the name no longer implies command-application truth.
+- [ ] Add rename/semantics clarification plan for misleading status fields.
+- [ ] Reduce unnecessary translation layers where the same command is reinterpreted multiple times.
+- [ ] Separate AUTO motion-derived commands from operator commands in architecture and naming.
+- [ ] Preserve working Err16 behavior while simplifying architecture.
+- [ ] Preserve TPL-specific stop semantics while simplifying architecture.
+- [ ] Define refactor order that does not require rediscovering backend-specific safety rules.
+
+### Checklist maintenance rule
+- add item only when confirmed;
+- remove item only after explicit verification;
+- do not silently rewrite history of defects.
+
+---
+
+## Refactor guardrails
+
+Refactor is allowed only under these constraints.
+
+### Guardrail 1 — do not break working fault behavior
+Especially:
+- Err16 reset path
+- current VFD fault mapping behavior
+
+### Guardrail 2 — do not generalize by deleting backend semantics
+Abstraction must keep:
+- `pumpvfd`-specific safe behavior
+- `pumptpl`-specific safe behavior
+
+### Guardrail 3 — simplify by removing duplicate interpretation layers
+Preferred direction:
+- fewer command translations
+- fewer duplicated status meanings
+- clearer ownership per layer
+
+### Guardrail 4 — preserve field truth
+For any status field, define exactly whether it means:
+- requested
+- acknowledged
+- last delivered
+- actual measured / reported
+- stale cached
+
+### Guardrail 5 — refactor in safe order
+Safe order:
+1. freeze canonical README rules
+2. define ownership and naming
+3. identify redundant layers
+4. only then change code paths
+
+---
+
+## Desired next architecture review outcome
+
+The next architecture review must produce:
+
+- one canonical flow of command ownership;
+- one canonical flow of status ownership;
+- one backend-neutral host model;
+- backend-local low-level semantics for VFD / TPL;
+- explicit naming for requested vs actual vs stale status;
+- explicit list of layers that can be removed or merged safely.
+
+No code simplification should happen before this reasoning is written and agreed here.
+
+---
+
+## Docs map
+
+Supporting docs remain useful, but are secondary to this README.
+
+### VFD references
+- `docs/vfd/README.md`
+- `docs/vfd/m900_m980_shared_semantics.md`
+- `docs/vfd/m900_m980_differences.md`
+- `docs/vfd/m900_m980_faults.md`
+- `docs/vfd/modbus_driver_contract.md`
+- `docs/vfd/test_plan_next.md`
+- `docs/vfd_faults.md`
+
+These documents provide detailed backend reference material.
+They do **not** replace the canonical rules in this README.
+
+---
+
+## Practical project rule
+
+Any future proposal must answer three questions before code changes start:
+
+1. What belongs to generic host logic?
+2. What belongs only to a backend?
+3. What evidence shows a layer is truly redundant rather than just temporarily inconvenient?
+
+If that is not written clearly, the change is not ready.
