@@ -6,10 +6,11 @@ Requires=moonraker.service
 
 [Service]
 Type=simple
-User=dan
-WorkingDirectory=/home/dan/drukmix
-Environment=DRUKMIX_CONFIG=/home/dan/printer_data/config/drukmix.cfg
-ExecStart=/usr/bin/python3 /home/dan/drukmix/drukmix_agent.py
+User=drukos
+Group=drukos
+WorkingDirectory=/opt/drukmix
+Environment=DRUKMIX_CONFIG=/etc/drukmix/drukmix.cfg
+ExecStart=/opt/drukmix/.venv/bin/python /opt/drukmix/drukmix_agent.py
 Restart=always
 RestartSec=2
 Nice=5
