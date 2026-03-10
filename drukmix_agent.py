@@ -225,9 +225,11 @@ def apply_status(ks: KlipperState, st: Dict[str, Any]) -> None:
 
 
 def is_printing(ks: KlipperState) -> bool:
-    ps = ks.print_state.lower()
-    it = ks.idle_state.lower()
-    return (ps == "printing") or (it == "printing")
+    ps = ks.print_state.lower().strip()
+    if ps:
+        return ps == "printing"
+    it = ks.idle_state.lower().strip()
+    return it == "printing"
 
 
 async def wait_moonraker_ready(log, ws_url: str, timeout_s: float = 30.0):
@@ -259,12 +261,21 @@ class MoonrakerClient:
         self._ws = await websockets.connect(self.ws_url, ping_interval=20, ping_timeout=20)
         self._reader_task = asyncio.create_task(self._reader_loop())
 
-        await self.call("server.connection.identify", {
-            "client_name": self.cfg.client_name,
-            "version": self.cfg.client_version,
-            "type": self.cfg.client_type,
-            "url": self.cfg.client_url,
-        })
+        try:
+            await self.call("server.connection.identify", {
+                "client_name": self.cfg.client_name,
+                "version": self.cfg.client_version,
+                "type": self.cfg.client_type,
+                "url": self.cfg.client_url,
+            })
+        except Exception as e:
+            msg = str(e)
+            if "Method not found" in msg or "-32601" in msg:
+                logging.getLogger("drukmix").warning(
+                    "moonraker: server.connection.identify unavailable, continue without identify"
+                )
+            else:
+                raise
 
         for m in (
             "drukmix_ping",
