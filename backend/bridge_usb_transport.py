@@ -187,7 +187,7 @@ class BridgeUsbTransport:
         pump_online = bool(body[off]); off += 1
         pump_running = bool(body[off]); off += 1
         target_milli_lpm = struct.unpack_from("<i", body, off)[0]; off += 4
-        _actual_milli_lpm = struct.unpack_from("<i", body, off)[0]; off += 4
+        off += 4  # reserved actual_milli_lpm field from bridge payload; ignored on host
         hw_setpoint_raw = struct.unpack_from("<i", body, off)[0]; off += 4
         pump_flags = struct.unpack_from("<H", body, off)[0]; off += 2
 

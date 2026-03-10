@@ -106,7 +106,6 @@ There is one canonical runtime pump status type:
 Canonical `PumpStatus` contains only backend-independent runtime fields:
 - `StatusCommon c`
 - `target_milli_lpm`
-- `actual_milli_lpm`
 - `max_milli_lpm`
 - `hw_setpoint_raw`
 - `link_flags`
@@ -323,7 +322,6 @@ This means the canonical model must describe pump behavior, not driver internals
 Recommended shared fields:
 - `StatusCommon c`
 - `target_milli_lpm`
-- `actual_milli_lpm`
 - `max_milli_lpm`
 - `hw_setpoint_raw`
 - `link_flags`
@@ -332,7 +330,7 @@ Recommended shared fields:
 ### Meaning of shared fields
 
 - `target_milli_lpm` = commanded target flow from the remote control layer
-- `actual_milli_lpm` = best available backend-independent estimate of real delivered flow
+- real delivered flow is currently **not exposed as a canonical host-visible field** because there is no independent flow sensor yet
 - `max_milli_lpm` = active configured upper limit
 - `hw_setpoint_raw` = backend raw actuation value, exposed only as a generic debug/control field
 - `link_flags` = communication and transport visibility flags
