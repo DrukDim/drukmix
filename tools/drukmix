@@ -8,15 +8,15 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 
 # -------------------- Paths (override via /etc/drukmix.env) --------------------
-DRUKMIX_REPO="${DRUKMIX_REPO:-/home/dan/drukmix}"
+DRUKMIX_REPO="${DRUKMIX_REPO:-/home/drukos/drukmix}"
 
 # live/runtime
-DRUKMIX_AGENT_LIVE="${DRUKMIX_AGENT_LIVE:-/home/dan/drukmix/drukmix_agent.py}"
-DRUKMIX_CFG="${DRUKMIX_CFG:-/home/dan/printer_data/config/drukmix.cfg}"
-DRUKMIX_MACROS="${DRUKMIX_MACROS:-/home/dan/printer_data/config/drukmix_macros.cfg}"
+DRUKMIX_AGENT_LIVE="${DRUKMIX_AGENT_LIVE:-/opt/drukmix/drukmix_agent.py}"
+DRUKMIX_CFG="${DRUKMIX_CFG:-/etc/drukmix/drukmix.cfg}"
+DRUKMIX_MACROS="${DRUKMIX_MACROS:-/home/drukos/printer_data/config/drukmix_macros.cfg}"
 DRUKMIX_UNIT="${DRUKMIX_UNIT:-/etc/systemd/system/drukmix.service}"
 DRUKMIX_SERVICE="${DRUKMIX_SERVICE:-drukmix.service}"
-DRUKMIX_LOG="${DRUKMIX_LOG:-/home/dan/printer_data/logs/drukmix.log}"
+DRUKMIX_LOG="${DRUKMIX_LOG:-/var/log/drukmix/drukmix.log}"
 
 # repo/source-of-truth
 REPO_AGENT="$DRUKMIX_REPO/drukmix_agent.py"
@@ -40,9 +40,9 @@ cmd_help(){
 drukmix — helper (repo <-> live) + git workflow
 
 Core ideas:
-  - repo is source of truth: /home/dan/drukmix
+  - repo is source of truth: /home/drukos/drukmix
   - live files are runtime: ~/printer_data/config + /etc/systemd
-  - agent runs from repo path
+  - agent runs from /opt/drukmix runtime path
   - during bring-up/debug, capture/publish are allowed
 
 Commands:
@@ -66,7 +66,7 @@ Commands:
 
 Notes:
   - helper copies cfg/macros/unit into live locations
-  - agent is expected at repo path: agent/drukmix_agent.py
+  - agent runtime path: /opt/drukmix/drukmix_agent.py
   - capture/publish are kept intentionally for printer-side debugging
 TXT
 }
