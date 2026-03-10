@@ -85,6 +85,11 @@ Recent live logs show:
 - command path works enough to run/stop the pump
 - telemetry / command acknowledgement shape is still more fragile than desired
 
+Additional verified compatibility issue:
+- on Moonraker `v0.10.0-10-gfb257f8` / API `1.5.0`, `connection.register_remote_method` is unavailable;
+- DrukMix agent must treat remote-method registration as optional compatibility behavior;
+- missing remote-method registration must not abort startup.
+
 ### Current observed mismatch
 During manual run testing:
 - run command reaches the pump
