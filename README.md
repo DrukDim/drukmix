@@ -663,6 +663,8 @@ This rule applies both to:
 ## Current confirmed defects / checklist
 
 Only confirmed items belong here.
+- [ ] Fix `tools/drukos install` deploy path so runtime copy does not try to delete active `.venv` contents and spam `cannot delete non-empty directory` errors.
+- [ ] Add Moonraker compatibility handling for missing `connection.register_remote_method`; startup currently continues, but remote DrukMix RPC methods may be unavailable on Moonraker `v0.10.0-10-gfb257f8` / API `1.5.0`.
 
 ### Active checklist
 
