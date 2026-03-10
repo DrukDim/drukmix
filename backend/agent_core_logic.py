@@ -53,7 +53,7 @@ class DrukMixCore:
         rev = vel < -max(0.0, self.cfg.retract_deadband_mms)
 
         if abs_vel < max(0.0, self.cfg.min_print_mms):
-            return CoreOutput(0.0, False, True, "below_min_print_speed")
+            return CoreOutput(0.0, False, False, "below_min_print_speed")
 
         lpm = abs_vel * inp.liters_per_mm * 60.0
         lpm *= max(0.0, inp.extrude_factor)
@@ -73,6 +73,6 @@ class DrukMixCore:
                 pct = max(pct, min_flow_pct)
 
         if pct <= 0.0:
-            return CoreOutput(0.0, False, True, "zero_pct")
+            return CoreOutput(0.0, False, False, "zero_pct")
 
         return CoreOutput(pct, rev, False, "ok")

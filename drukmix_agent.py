@@ -541,7 +541,24 @@ async def run_agent(cfg_path: str):
                     if msg.get("method") == "notify_status_update":
                         params = msg.get("params", [])
                         if params and isinstance(params[0], dict):
-                            apply_status(ks, params[0])
+                            st0 = params[0]
+                            apply_status(ks, st0)
+
+                            if (
+                                (not fs.active)
+                                and ("motion_report" in st0)
+                                and ("live_extruder_velocity" in st0["motion_report"])
+                            ):
+                                printing_now = is_printing(ks)
+                                if printing_now and (not ks.is_paused):
+                                    out = core.compute(CoreInput(
+                                        printing=printing_now,
+                                        paused=ks.is_paused,
+                                        live_extruder_velocity=ks.live_extruder_velocity,
+                                        extrude_factor=ks.extrude_factor,
+                                        liters_per_mm=liters_per_mm,
+                                    ), now)
+                                    backend.set_auto_target_pct(out.target_pct, out.rev)
                         continue
 
                     rc = parse_remote_call(msg)
