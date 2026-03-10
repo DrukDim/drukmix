@@ -14,6 +14,7 @@ class PumpVfdBackend(PumpBackend):
     def __init__(self, transport):
         self.transport = transport
         self._auto_reset_err16_done = False
+        self._err16_active = False
         self._last_target_pct = 0.0
         self._last_rev = False
 
@@ -40,9 +41,10 @@ class PumpVfdBackend(PumpBackend):
 
     def reset_fault(self) -> None:
         self.transport.vfd_reset_fault()
+        self._auto_reset_err16_done = False
 
     def poll_status(self) -> PumpStatus:
-        raw = self.transport.read_status()
+        raw = self.transport.read_status(allow_cached=False)
         if raw is None:
             return PumpStatus(
                 backend=self.name,
@@ -68,6 +70,15 @@ class PumpVfdBackend(PumpBackend):
             )
 
         fault_code = int(raw.get("fault_code", 0))
+
+        if fault_code == 16:
+            if not self._err16_active:
+                self._auto_reset_err16_done = False
+            self._err16_active = True
+        else:
+            self._err16_active = False
+            self._auto_reset_err16_done = False
+
         info = get_vfd_fault_info(fault_code) if fault_code > 0 else None
 
         return PumpStatus(

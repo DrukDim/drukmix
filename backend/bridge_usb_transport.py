@@ -91,6 +91,7 @@ class BridgeUsbTransport:
         self.seq = 1
         self.rxbuf = bytearray()
         self._last_status: Optional[dict] = None
+        self._last_status_monotonic: float = 0.0
 
     def open(self):
         self.ser = serial.Serial(self.port, self.baud, timeout=0.02)
@@ -237,14 +238,28 @@ class BridgeUsbTransport:
             st = self._parse_status(pkt)
             if st is not None:
                 self._last_status = st
+                self._last_status_monotonic = time.monotonic()
                 return st
         return None
 
-    def read_status(self):
+    def invalidate_status_cache(self):
+        self._last_status = None
+        self._last_status_monotonic = 0.0
+
+    def read_status(self, allow_cached: bool = False, max_cache_age_s: float = 0.0):
         st = self._request_status()
         if st is not None:
             return st
-        return self._last_status
+
+        if (
+            allow_cached
+            and self._last_status is not None
+            and max_cache_age_s > 0.0
+            and (time.monotonic() - self._last_status_monotonic) <= max_cache_age_s
+        ):
+            return dict(self._last_status)
+
+        return None
 
     def vfd_set_run(self, pct: float, rev: bool):
         max_lpm = 10000
@@ -257,3 +272,4 @@ class BridgeUsbTransport:
 
     def vfd_reset_fault(self):
         self._send_packet(USB_RESET_FAULT, struct.pack("<H", 0))
+        self.invalidate_status_cache()

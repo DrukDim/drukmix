@@ -477,6 +477,7 @@ async def run_agent(cfg_path: str):
             last_cfg_check_t = 0.0
             last_cfg_mtime = 0.0
             last_fault_notify_key = None
+            suppress_fault_until = 0.0
 
             while True:
                 now = time.monotonic()
@@ -594,6 +595,8 @@ async def run_agent(cfg_path: str):
 
                     if method == "drukmix_reset_fault":
                         backend.reset_fault()
+                        suppress_fault_until = time.monotonic() + 3.0
+                        last_fault_notify_key = None
                         await maybe_respond(mr, cfg.ui_notify, "command", "DrukMix: reset_fault sent")
                         continue
 
@@ -610,11 +613,13 @@ async def run_agent(cfg_path: str):
                     try:
                         did_reset = backend.maybe_auto_reset_startup_fault(printing=printing, running=st.running)
                         if did_reset:
+                            suppress_fault_until = time.monotonic() + 3.0
+                            last_fault_notify_key = None
                             log.info("drukmix: safe one-shot auto-reset for Err16")
                     except Exception as e:
                         log.warning(f"drukmix: err16 auto-reset check failed: {e}")
 
-                if st.faulted and st.fault_code > 0:
+                if st.faulted and st.fault_code > 0 and time.monotonic() >= suppress_fault_until:
                     if printing:
                         backend.stop()
                         if st.pause_print and not ks.is_paused:
