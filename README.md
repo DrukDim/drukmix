@@ -71,8 +71,8 @@ Recent live logs show:
 During manual run testing:
 - run command reaches the pump
 - pump physically runs
-- status still reports `reported_output_pct=0.0`
-- status path therefore does not yet fully represent real applied output
+- host-visible flow output telemetry was previously modeled too optimistically
+- current host model no longer exposes fake measured-flow style fields
 
 This means command delivery and telemetry truth are not yet equivalent.
 
@@ -147,6 +147,11 @@ The system must distinguish between:
 - requested target
 - delivered command
 - actual device-reported state
+
+Current project constraint:
+- there is currently no encoder, flowmeter, or pressure-based delivered-flow measurement in the deployed system;
+- host-visible telemetry must not claim measured real output where no real sensor exists;
+- placeholder or derived fields that look like measured delivered flow must not be added to the canonical host model.
 
 ### Invariant 5 — no permanent VFD bias in canonical model
 The canonical model must not assume:
@@ -288,8 +293,8 @@ The current architecture must not use one field as a silent substitute for anoth
 The current `pumpvfd` path already shows a field-truth mismatch:
 
 - backend keeps `target_pct` as last requested target;
-- host-visible `reported_output_pct` is derived from `reported_output_milli_lpm`;
-- physical pump motion may already exist while `reported_output_pct` still reports `0.0`.
+- there is currently no independent host-visible measured-flow field;
+- physical pump motion and command delivery must not be confused with measured delivered flow.
 
 Therefore current telemetry does not yet cleanly distinguish:
 - requested target
@@ -357,7 +362,6 @@ Meaning:
 - `rev_active`
 - `control_mode`
 - `reported_target_milli_lpm`
-- `reported_output_milli_lpm`
 - `hw_setpoint_raw`
 - `pump_flags`
 - `applied_code`
@@ -368,10 +372,9 @@ Meaning:
 - may still differ from real physical output
 
 #### Backend-reported derived field
-- `reported_output_pct`
 
 Meaning:
-- derived from `reported_output_milli_lpm / pump_max_milli_lpm`
+- currently not exposed in the canonical host model because there is no independent delivered-flow sensor
 - not measured physical output
 - must not be treated as proof that the pump is or is not physically moving
 
@@ -386,7 +389,6 @@ Therefore current architecture must not treat:
 - `target_pct`
 - `last_ack_seq`
 - `reported_running`
-- `reported_output_pct`
 
 as interchangeable truth.
 
@@ -396,7 +398,7 @@ as interchangeable truth.
 This plan is for naming cleanup only.
 It must preserve current behavior until each rename is implemented and verified.
 
-#### 1. `reported_output_pct`
+#### 1. measured delivered flow telemetry
 Current owner:
 - transport/backend-derived field
 
@@ -404,7 +406,7 @@ Current truth class:
 - `backend_reported` derived field
 
 Current source:
-- derived from `reported_output_milli_lpm / pump_max_milli_lpm`
+- currently not exposed in the canonical host model because there is no independent delivered-flow sensor
 
 Problem:
 - name sounds like “command was applied”
@@ -413,8 +415,7 @@ Problem:
 
 Target direction:
 - rename to one of:
-  - `reported_output_pct`
-  - `derived_output_pct`
+    - `derived_output_pct`
   - `backend_output_pct`
 
 Rule:
@@ -535,7 +536,7 @@ Target direction:
 Rule:
 - if host also owns target-flow naming, host and backend names must not collide semantically
 
-#### 7. `reported_output_milli_lpm`
+#### 7. delivered flow telemetry
 Current owner:
 - backend/device-reported state
 
@@ -548,8 +549,7 @@ Problem:
 
 Target direction:
 - rename toward:
-  - `reported_output_milli_lpm`
-  - `backend_output_milli_lpm`
+    - `backend_output_milli_lpm`
 
 Rule:
 - unless there is an independent sensor, this field must not imply physical measured truth
@@ -585,7 +585,7 @@ Renames must be implemented in this order:
 
 The first rename target should be:
 
-- `applied_pct` -> `reported_output_pct`
+- `applied_pct` was removed from the host model because it implied false measured-output semantics
 
 Reason:
 - it is currently the most misleading field name
@@ -653,7 +653,7 @@ Only confirmed items belong here.
 - [ ] Audit why `transport_link_ok` intermittently drops during otherwise idle/healthy operation.
 - [ ] Classify current operator-visible fields as `requested`, `delivered`, `acknowledged`, `backend_reported`, `measured`, or `stale`.
 - [ ] Separate requested target, delivered command, backend-reported output, and real physical output in naming and architecture.
-- [x] Rename misleading field `applied_pct` to `reported_output_pct` so the name no longer implies command-application truth.
+- [x] Remove misleading host field `applied_pct` from the canonical host model.
 - [ ] Add rename/semantics clarification plan for misleading status fields.
 - [ ] Reduce unnecessary translation layers where the same command is reinterpreted multiple times.
 - [ ] Separate AUTO motion-derived commands from operator commands in architecture and naming.
