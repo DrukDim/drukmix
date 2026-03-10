@@ -53,6 +53,24 @@ Current host stack:
 ### Current deployed backend
 Current deployed field path is `pumpvfd`.
 
+### Canonical deployment paths
+Current canonical deployment layout is:
+
+- source repo: `/home/drukos/drukmix`
+- runtime app dir: `/opt/drukmix`
+- runtime config dir: `/etc/drukmix`
+- active config file: `/etc/drukmix/drukmix.cfg`
+- active macros file: `/home/drukos/printer_data/config/drukmix_macros.cfg`
+- systemd unit: `/etc/systemd/system/drukmix.service`
+- runtime log: `/var/log/drukmix/drukmix.log`
+
+Rules:
+- deployment must be performed from repo state, not by ad-hoc manual edits on the printer;
+- runtime files under `/opt/drukmix` and `/etc/drukmix` are the deployed result;
+- printer-side changes are not canonical until committed back to repo;
+- preferred workflow is: `repo -> deploy -> restart -> verify`.
+
+
 ### Current host control path
 Current host control chain is:
 
