@@ -661,6 +661,16 @@ async def run_agent(cfg_path: str):
                     if printing:
                         backend.stop()
                         if st.pause_print and not ks.is_paused:
+                            log.warning(
+                                "DBG pause reason=fault print=%s idle=%s paused=%d fault=%d code=%d link_ok=%d mode=%s",
+                                ks.print_state,
+                                ks.idle_state,
+                                int(ks.is_paused),
+                                int(st.faulted),
+                                st.fault_code,
+                                int(st.link_ok),
+                                st.control_mode,
+                            )
                             try:
                                 await mr.pause_print()
                             except Exception:
@@ -700,6 +710,17 @@ async def run_agent(cfg_path: str):
                     backend.set_auto_target_pct(target_pct, rev)
 
                 if cfg.pause_on_pump_offline and printing and (not ks.is_paused) and (not st.link_ok):
+                    log.warning(
+                        "DBG pause reason=pump_offline print=%s idle=%s paused=%d link_ok=%d age_ms=%s mode=%s vel=%.3f target_pct=%.2f",
+                        ks.print_state,
+                        ks.idle_state,
+                        int(ks.is_paused),
+                        int(st.link_ok),
+                        st.age_ms,
+                        st.control_mode,
+                        ks.live_extruder_velocity,
+                        target_pct,
+                    )
                     try:
                         await mr.pause_print()
                     except Exception:
@@ -707,6 +728,16 @@ async def run_agent(cfg_path: str):
                     await maybe_respond(mr, cfg.ui_notify, "error", "DrukMix: pump offline")
 
                 if cfg.pause_on_manual_mode and printing and (not ks.is_paused) and st.control_mode != "AUTO":
+                    log.warning(
+                        "DBG pause reason=manual_mode print=%s idle=%s paused=%d mode=%s link_ok=%d vel=%.3f target_pct=%.2f",
+                        ks.print_state,
+                        ks.idle_state,
+                        int(ks.is_paused),
+                        st.control_mode,
+                        int(st.link_ok),
+                        ks.live_extruder_velocity,
+                        target_pct,
+                    )
                     try:
                         await mr.pause_print()
                     except Exception:
