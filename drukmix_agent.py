@@ -232,6 +232,12 @@ def is_printing(ks: KlipperState) -> bool:
     return it == "printing"
 
 
+def pump_should_run(cfg: Cfg, ks: KlipperState, target_pct: float) -> bool:
+    if target_pct > 0.5:
+        return True
+    return abs(float(ks.live_extruder_velocity)) > max(0.1, float(cfg.min_print_mms))
+
+
 async def wait_moonraker_ready(log, ws_url: str, timeout_s: float = 30.0):
     deadline = time.monotonic() + timeout_s
     last_err = None
@@ -499,6 +505,7 @@ async def run_agent(cfg_path: str):
             last_cfg_mtime = 0.0
             last_fault_notify_key = None
             suppress_fault_until = 0.0
+            pump_offline_since = None
 
             while True:
                 now = time.monotonic()
@@ -709,9 +716,32 @@ async def run_agent(cfg_path: str):
                 else:
                     backend.set_auto_target_pct(target_pct, rev)
 
-                if cfg.pause_on_pump_offline and printing and (not ks.is_paused) and (not st.link_ok):
+                should_run_now = pump_should_run(cfg, ks, target_pct)
+
+                if st.link_ok or (not printing) or ks.is_paused or (not should_run_now):
+                    pump_offline_since = None
+                else:
+                    if pump_offline_since is None:
+                        pump_offline_since = now
+
+                offline_by_age = False
+                if st.age_ms is not None:
+                    offline_by_age = st.age_ms >= int(max(0.0, cfg.pump_offline_timeout_s) * 1000.0)
+
+                offline_by_time = False
+                if pump_offline_since is not None:
+                    offline_by_time = (now - pump_offline_since) >= max(0.0, cfg.bridge_offline_timeout_s)
+
+                if (
+                    cfg.pause_on_pump_offline
+                    and printing
+                    and (not ks.is_paused)
+                    and should_run_now
+                    and (not st.link_ok)
+                    and (offline_by_age or offline_by_time)
+                ):
                     log.warning(
-                        "DBG pause reason=pump_offline print=%s idle=%s paused=%d link_ok=%d age_ms=%s mode=%s vel=%.3f target_pct=%.2f",
+                        "DBG pause reason=pump_offline print=%s idle=%s paused=%d link_ok=%d age_ms=%s mode=%s vel=%.3f target_pct=%.2f should_run=%d off_age=%d off_time=%d",
                         ks.print_state,
                         ks.idle_state,
                         int(ks.is_paused),
@@ -720,6 +750,9 @@ async def run_agent(cfg_path: str):
                         st.control_mode,
                         ks.live_extruder_velocity,
                         target_pct,
+                        int(should_run_now),
+                        int(offline_by_age),
+                        int(offline_by_time),
                     )
                     try:
                         await mr.pause_print()

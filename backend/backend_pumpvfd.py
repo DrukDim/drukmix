@@ -17,27 +17,37 @@ class PumpVfdBackend(PumpBackend):
         self._err16_active = False
         self._last_target_pct = 0.0
         self._last_rev = False
+        self._stopped = True
 
     def open(self) -> None:
         self.transport.open()
+        self._stopped = True
 
     def close(self) -> None:
         self.transport.close()
 
     def set_auto_target_pct(self, pct: float, rev: bool) -> None:
         pct = clamp(float(pct), 0.0, 100.0)
-        self._last_target_pct = pct
-        self._last_rev = bool(rev)
+        rev = bool(rev)
 
+        self._last_target_pct = pct
+        self._last_rev = rev
+
+        # zero-flow: не спамимо STOP кожен цикл
         if pct <= 0.0:
-            self.stop()
+            if not self._stopped:
+                self.transport.vfd_stop()
+                self._stopped = True
             return
 
         self.transport.vfd_set_run(pct=pct, rev=rev)
+        self._stopped = False
 
     def stop(self) -> None:
         self._last_target_pct = 0.0
-        self.transport.vfd_stop()
+        if not self._stopped:
+            self.transport.vfd_stop()
+            self._stopped = True
 
     def reset_fault(self) -> None:
         self.transport.vfd_reset_fault()
