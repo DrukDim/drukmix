@@ -67,10 +67,18 @@ Rules:
 ## Status
 
 Current verified state:
-- host stack is Klipper + Moonraker + Mainsail + separate `drukmix` agent service;
+- host stack is Klipper + Moonraker + Mainsail + a separate `drukmix` agent service;
 - deployed backend is currently `pumpvfd`;
-- command path is working;
+- the command path is working;
 - telemetry and status semantics are still under active cleanup and clarification.
+
+## Current limitations
+
+Current known limitations include:
+- deployment still assumes the current `drukos`-style layout and fixed canonical paths;
+- user/path portability is not solved yet;
+- the currently deployed live path is `pumpvfd`, even though the architecture is intended to remain multi-backend;
+- telemetry semantics are still being cleaned up to better separate requested, delivered, backend-reported, and real physical state.
 
 ## Project documents
 
