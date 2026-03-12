@@ -22,6 +22,11 @@ HORIZONS = (
     ("planned_v_1000ms", 1.000),
     ("planned_v_2000ms", 2.000),
     ("planned_v_4000ms", 4.000),
+    ("planned_v_6000ms", 6.000),
+    ("planned_v_8000ms", 8.000),
+    ("planned_v_10000ms", 10.000),
+    ("planned_v_12000ms", 12.000),
+    ("planned_v_15000ms", 15.000),
 )
 
 KEEP_HISTORY_S = 5.0
