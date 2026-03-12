@@ -4,13 +4,26 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 USER_NAME="$(id -un)"
-USER_HOME="$(getent passwd "$USER_NAME" | cut -d: -f6)"
+USER_HOME="${HOME:-}"
+
+if [[ -z "$USER_HOME" ]]; then
+  USER_HOME="$(getent passwd "$USER_NAME" | cut -d: -f6 || true)"
+fi
+if [[ -z "$USER_HOME" ]]; then
+  USER_HOME="$(python3 -c 'import os,pwd; print(pwd.getpwuid(os.getuid()).pw_dir)')"
+fi
+if [[ -z "$USER_HOME" ]]; then
+  echo "Cannot determine user home directory"
+  exit 2
+fi
+
 PRINTER_CFG_DIR="${PRINTER_CFG_DIR:-$USER_HOME/printer_data/config}"
+PRINTER_LOG_DIR="${PRINTER_LOG_DIR:-$USER_HOME/printer_data/logs}"
 
-CFG_TEMPLATE="$REPO_DIR/config/drukmix.cfg"
+CFG_TEMPLATE="$REPO_DIR/config_examples/drukmix.cfg"
+MACROS_TEMPLATE="$REPO_DIR/config_examples/drukmix_macros.cfg"
+
 CFG_DST="$PRINTER_CFG_DIR/drukmix.cfg"
-
-MACROS_SRC="$REPO_DIR/config/drukmix_macros.cfg"
 MACROS_DST="$PRINTER_CFG_DIR/drukmix_macros.cfg"
 
 PRINTER_CFG="$PRINTER_CFG_DIR/printer.cfg"
@@ -20,13 +33,17 @@ SERVICE_DST="/etc/systemd/system/drukmix.service"
 require_repo() {
   test -f "$REPO_DIR/drukmix_agent.py"
   test -f "$CFG_TEMPLATE"
-  test -f "$MACROS_SRC"
+  test -f "$MACROS_TEMPLATE"
   test -f "$SERVICE_TEMPLATE"
 }
 
 require_paths() {
   if [[ ! -d "$PRINTER_CFG_DIR" ]]; then
     echo "Printer config dir not found: $PRINTER_CFG_DIR"
+    exit 2
+  fi
+  if [[ ! -d "$PRINTER_LOG_DIR" ]]; then
+    echo "Printer log dir not found: $PRINTER_LOG_DIR"
     exit 2
   fi
   if [[ ! -f "$PRINTER_CFG" ]]; then
@@ -81,13 +98,25 @@ install_cfg_if_missing() {
   fi
 }
 
-patch_cfg() {
-  python3 - <<PY
+install_macros_if_missing() {
+  if [[ ! -f "$MACROS_DST" ]]; then
+    cp "$MACROS_TEMPLATE" "$MACROS_DST"
+    echo "Installed default macros: $MACROS_DST"
+  else
+    echo "Keeping existing macros: $MACROS_DST"
+  fi
+}
+
+patch_cfg_if_needed() {
+  CFG_DST="$CFG_DST" USER_HOME="$USER_HOME" PRINTER_LOG_DIR="$PRINTER_LOG_DIR" python3 - <<'PY'
 from pathlib import Path
 import os
 
 p = Path(os.environ["CFG_DST"])
 user_home = os.environ["USER_HOME"]
+log_dir = os.environ["PRINTER_LOG_DIR"]
+log_file = f"{log_dir}/drukmix.log"
+
 s = p.read_text()
 
 repl = {
@@ -95,6 +124,9 @@ repl = {
     "/home/drukos/": user_home + "/",
     "printer_cfg = /home/dan/printer_data/config/printer.cfg": f"printer_cfg = {user_home}/printer_data/config/printer.cfg",
     "printer_cfg = /home/drukos/printer_data/config/printer.cfg": f"printer_cfg = {user_home}/printer_data/config/printer.cfg",
+    "log_file = /var/log/drukmix/drukmix.log": f"log_file = {log_file}",
+    "log_file = /home/drukos/printer_data/logs/drukmix.log": f"log_file = {log_file}",
+    "log_file = /home/dan/printer_data/logs/drukmix.log": f"log_file = {log_file}",
 }
 
 for a, b in repl.items():
@@ -103,19 +135,16 @@ for a, b in repl.items():
 if "printer_cfg =" not in s:
     s += f"\nprinter_cfg = {user_home}/printer_data/config/printer.cfg\n"
 
+if "log_file =" not in s:
+    s += f"\nlog_file = {log_file}\n"
+
 p.write_text(s)
 print(f"patched {p}")
 PY
 }
 
-install_macros_link() {
-  rm -f "$MACROS_DST"
-  ln -s "$MACROS_SRC" "$MACROS_DST"
-  echo "Linked macros: $MACROS_DST -> $MACROS_SRC"
-}
-
 ensure_macro_include() {
-  python3 - <<PY
+  PRINTER_CFG="$PRINTER_CFG" python3 - <<'PY'
 from pathlib import Path
 import os
 
@@ -136,7 +165,7 @@ for line in lines:
 if not seen:
     out.append(needle)
 
-p.write_text("\\n".join(out) + "\\n")
+p.write_text("\n".join(out) + "\n")
 print(f"normalized {p}")
 PY
 }
@@ -151,23 +180,16 @@ restart_service() {
   sudo systemctl restart drukmix.service
 }
 
-reload_klipper() {
-  curl -s -X POST localhost:7125/printer/gcode/script \
-    -H 'Content-Type: application/json' \
-    -d '{"script":"FIRMWARE_RESTART"}' >/dev/null || true
-}
-
 do_install() {
   require_repo
   require_paths
   ensure_venv
   compile_check
   install_cfg_if_missing
-  CFG_DST="$CFG_DST" USER_HOME="$USER_HOME" patch_cfg
-  install_macros_link
-  PRINTER_CFG="$PRINTER_CFG" ensure_macro_include
+  install_macros_if_missing
+  patch_cfg_if_needed
+  ensure_macro_include
   install_service
-  reload_klipper
   restart_service
   do_status
 }
@@ -178,7 +200,6 @@ do_update() {
   git -C "$REPO_DIR" pull --ff-only
   ensure_venv
   compile_check
-  install_macros_link
   install_service
   restart_service
   do_status
@@ -190,20 +211,15 @@ do_purge() {
   sudo rm -f "$SERVICE_DST"
   sudo systemctl daemon-reload
 
-  if [[ -L "$MACROS_DST" || -f "$MACROS_DST" ]]; then
-    rm -f "$MACROS_DST"
-    echo "Removed macros file/link: $MACROS_DST"
-  fi
+  rm -f "$MACROS_DST"
 
   echo
   echo "Purge completed."
   echo "Kept repo: $REPO_DIR"
   echo "Kept venv: $REPO_DIR/.venv"
   echo "Kept config: $CFG_DST"
+  echo "Removed live macros file: $MACROS_DST"
   echo "printer.cfg was not modified except possible existing include line."
-  echo
-  echo "To remove repo-local venv too, run:"
-  echo "  rm -rf '$REPO_DIR/.venv'"
 }
 
 do_restart() {
@@ -225,6 +241,7 @@ do_status() {
   echo
   echo "== paths =="
   echo "printer cfg dir: $PRINTER_CFG_DIR"
+  echo "printer log dir: $PRINTER_LOG_DIR"
   echo "config: $CFG_DST"
   echo "macros: $MACROS_DST"
   echo "service: $SERVICE_DST"
@@ -244,7 +261,11 @@ do_status() {
 }
 
 do_logs() {
-  journalctl -u drukmix.service -n 100 -f
+  if [[ -f "$PRINTER_LOG_DIR/drukmix.log" ]]; then
+    tail -n 100 -f "$PRINTER_LOG_DIR/drukmix.log"
+  else
+    journalctl -u drukmix.service -n 100 -f
+  fi
 }
 
 do_doctor() {
@@ -253,10 +274,11 @@ do_doctor() {
 
   command -v python3 >/dev/null 2>&1 && echo "python3: ok" || echo "python3: missing"
   command -v curl >/dev/null 2>&1 && echo "curl: ok" || echo "curl: missing"
+  command -v getent >/dev/null 2>&1 && echo "getent: ok" || echo "getent: missing (fallbacks still exist)"
   [[ -x "$REPO_DIR/.venv/bin/python" ]] && echo "venv: ok" || echo "venv: missing"
   [[ -f "$CFG_DST" ]] && echo "config: ok ($CFG_DST)" || echo "config: missing ($CFG_DST)"
   [[ -f "$PRINTER_CFG" ]] && echo "printer.cfg: ok ($PRINTER_CFG)" || echo "printer.cfg: missing ($PRINTER_CFG)"
-  [[ -L "$MACROS_DST" || -f "$MACROS_DST" ]] && echo "macros: ok ($MACROS_DST)" || echo "macros: missing ($MACROS_DST)"
+  [[ -f "$MACROS_DST" ]] && echo "macros: ok ($MACROS_DST)" || echo "macros: missing ($MACROS_DST)"
   [[ -f "$SERVICE_DST" ]] && echo "service file: ok ($SERVICE_DST)" || echo "service file: missing ($SERVICE_DST)"
 
   echo

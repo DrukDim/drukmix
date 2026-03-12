@@ -11,6 +11,7 @@ WorkingDirectory=/home/drukos/drukmix
 ExecStart=/home/drukos/drukmix/.venv/bin/python /home/drukos/drukmix/drukmix_agent.py --config /home/drukos/printer_data/config/drukmix.cfg
 Restart=always
 RestartSec=2
+Nice=5
 
 [Install]
 WantedBy=multi-user.target
