@@ -244,6 +244,23 @@ Status: active checklist item
 
 Refactor sequencing must preserve already learned backend safety knowledge instead of forcing rediscovery.
 
+
+### 24. Reduce deployment dependence on fixed user/path assumptions
+
+Status: active checklist item
+
+Current deployment is still tied to the existing `drukos`-style layout, fixed paths, and at least some user/path assumptions.
+
+This must remain explicit until portability is intentionally implemented and verified.
+
+### 25. Document real operating assumptions explicitly in README
+
+Status: active checklist item
+
+README should state the real expected operating environment clearly, including Klipper, Moonraker, Mainsail, separate `drukmix` service, and the current canonical deployment layout.
+
+The project should not present itself as portable or generic beyond what is actually verified.
+
 ## Resolution policy
 
 An item may be marked resolved only when:
