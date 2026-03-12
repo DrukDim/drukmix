@@ -190,6 +190,12 @@ do_install() {
   patch_cfg_if_needed
   ensure_macro_include
   install_service
+  reload_udev_rules
+  if wait_for_bridge_alias; then
+    echo "bridge alias ready: /dev/drukos-bridge -> $(readlink -f /dev/drukos-bridge)"
+  else
+    echo "WARNING: /dev/drukos-bridge not present after install"
+  fi
   restart_service
   do_status
 }
@@ -268,6 +274,42 @@ do_logs() {
   fi
 }
 
+wait_for_bridge_alias() {
+  local n=0
+  while [[ $n -lt 20 ]]; do
+    if [[ -e /dev/drukos-bridge ]]; then
+      return 0
+    fi
+    sleep 0.5
+    n=$((n+1))
+  done
+  return 1
+}
+
+reload_udev_rules() {
+  if command -v udevadm >/dev/null 2>&1; then
+    sudo udevadm control --reload-rules || true
+    sudo udevadm trigger || true
+    udevadm settle || true
+  fi
+}
+
+bridge_status() {
+  if [[ -L /dev/drukos-bridge || -e /dev/drukos-bridge ]]; then
+    echo "bridge alias: ok (/dev/drukos-bridge)"
+    readlink -f /dev/drukos-bridge 2>/dev/null | sed 's/^/bridge target: /'
+  else
+    echo "bridge alias: missing (/dev/drukos-bridge)"
+  fi
+
+  if [[ -d /dev/serial/by-id ]]; then
+    echo "serial by-id:"
+    ls -1 /dev/serial/by-id 2>/dev/null | sed 's/^/  /' || true
+  else
+    echo "serial by-id: missing dir"
+  fi
+}
+
 do_doctor() {
   echo "== doctor =="
   echo
@@ -275,11 +317,15 @@ do_doctor() {
   command -v python3 >/dev/null 2>&1 && echo "python3: ok" || echo "python3: missing"
   command -v curl >/dev/null 2>&1 && echo "curl: ok" || echo "curl: missing"
   command -v getent >/dev/null 2>&1 && echo "getent: ok" || echo "getent: missing (fallbacks still exist)"
+  command -v udevadm >/dev/null 2>&1 && echo "udevadm: ok" || echo "udevadm: missing"
   [[ -x "$REPO_DIR/.venv/bin/python" ]] && echo "venv: ok" || echo "venv: missing"
   [[ -f "$CFG_DST" ]] && echo "config: ok ($CFG_DST)" || echo "config: missing ($CFG_DST)"
   [[ -f "$PRINTER_CFG" ]] && echo "printer.cfg: ok ($PRINTER_CFG)" || echo "printer.cfg: missing ($PRINTER_CFG)"
   [[ -f "$MACROS_DST" ]] && echo "macros: ok ($MACROS_DST)" || echo "macros: missing ($MACROS_DST)"
   [[ -f "$SERVICE_DST" ]] && echo "service file: ok ($SERVICE_DST)" || echo "service file: missing ($SERVICE_DST)"
+
+  echo
+  bridge_status
 
   echo
   echo "Moonraker:"
