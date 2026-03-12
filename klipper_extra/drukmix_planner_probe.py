@@ -5,58 +5,103 @@
 # - keep runtime impact low
 # - avoid changing actual print behavior
 #
-# This file is intentionally minimal and instrumentation-only.
+# Research approach in this version:
+# - do NOT try to infer future planner state from motion_report history access
+# - mirror extruder moves at enqueue time via PrinterExtruder.process_move()
+# - compute future planned velocity from the mirrored queue
+#
+# This file is instrumentation-only.
 
 import logging
+from collections import deque
+
+HORIZONS = (
+    ("planned_v_now", 0.0),
+    ("planned_v_250ms", 0.250),
+    ("planned_v_500ms", 0.500),
+    ("planned_v_1000ms", 1.000),
+    ("planned_v_2000ms", 2.000),
+    ("planned_v_4000ms", 4.000),
+)
+
+KEEP_HISTORY_S = 5.0
 
 
 class DrukMixPlannerProbe:
     def __init__(self, config):
         self.printer = config.get_printer()
+        self.reactor = self.printer.get_reactor()
         self.toolhead = None
-        self.motion_report = None
         self.mcu = None
         self.extruder_name = config.get('extruder', 'extruder')
-        self.lookahead_points = [0.0, 0.25, 0.5, 1.0]
+        self.extruder_obj = None
+        self._orig_process_move = None
+        self._moves = deque()
         self.status = {
             'available': False,
             'extruder': self.extruder_name,
             'estimated_print_time': None,
             'queue_end_print_time': None,
             'queue_tail_s': None,
-            'planned_pos_now': None,
-            'planned_v_now': None,
-            'planned_pos_250ms': None,
-            'planned_v_250ms': None,
-            'planned_pos_500ms': None,
-            'planned_v_500ms': None,
-            'planned_pos_1000ms': None,
-            'planned_v_1000ms': None,
-            'data_source': 'trapq',
+            'data_source': 'enqueue_mirror',
         }
         self.printer.register_event_handler("klippy:connect", self._handle_connect)
 
     def _handle_connect(self):
-        try:
-            self.toolhead = self.printer.lookup_object('toolhead')
-        except Exception:
-            self.toolhead = None
-        try:
-            self.motion_report = self.printer.lookup_object('motion_report', None)
-        except Exception:
-            self.motion_report = None
-        try:
-            self.mcu = self.printer.lookup_object('mcu', None)
-        except Exception:
-            self.mcu = None
-
+        self.toolhead = self.printer.lookup_object('toolhead', None)
+        self.mcu = self.printer.lookup_object('mcu', None)
+        self.extruder_obj = self.printer.lookup_object(self.extruder_name, None)
+        self._install_hook()
+        self.status['available'] = bool(
+            self.toolhead is not None
+            and self.mcu is not None
+            and self.extruder_obj is not None
+            and self._orig_process_move is not None
+        )
         logging.info(
-            "drukmix_planner_probe connected: extruder=%s available=%s",
+            "drukmix_planner_probe connected: extruder=%s available=%s hooked=%s",
             self.extruder_name,
-            bool(self.toolhead is not None and self.motion_report is not None),
+            self.status['available'],
+            self._orig_process_move is not None,
         )
 
-    def _get_estimated_print_time(self, eventtime):
+    def _install_hook(self):
+        if self.extruder_obj is None:
+            return
+        if self._orig_process_move is not None:
+            return
+
+        orig = self.extruder_obj.process_move
+        probe = self
+
+        def wrapped_process_move(print_time, move, ea_index):
+            axis_r = move.axes_r[ea_index]
+            accel = move.accel * axis_r
+            start_v = move.start_v * axis_r
+            cruise_v = move.cruise_v * axis_r
+            total_t = move.accel_t + move.cruise_t + move.decel_t
+            end_time = print_time + total_t
+
+            probe._moves.append({
+                'start_time': float(print_time),
+                'end_time': float(end_time),
+                'accel_t': float(move.accel_t),
+                'cruise_t': float(move.cruise_t),
+                'decel_t': float(move.decel_t),
+                'start_v': float(start_v),
+                'cruise_v': float(cruise_v),
+                'accel': float(accel),
+                'start_pos': float(move.start_pos[ea_index]),
+                'can_pressure_advance': bool(
+                    axis_r > 0.0 and (move.axes_d[0] or move.axes_d[1])
+                ),
+            })
+            return orig(print_time, move, ea_index)
+
+        self.extruder_obj.process_move = wrapped_process_move
+        self._orig_process_move = orig
+
+    def _estimated_print_time(self, eventtime):
         if self.mcu is None:
             return None
         try:
@@ -64,59 +109,76 @@ class DrukMixPlannerProbe:
         except Exception:
             return None
 
-    def _get_queue_end_print_time(self):
-        if self.toolhead is None:
-            return None
-        try:
-            return float(self.toolhead.get_last_move_time())
-        except Exception:
+    def _prune(self, est_print_time):
+        if est_print_time is None:
+            return
+        cutoff = est_print_time - KEEP_HISTORY_S
+        while self._moves and self._moves[0]['end_time'] < cutoff:
+            self._moves.popleft()
+
+    def _find_move_at(self, t):
+        for m in self._moves:
+            if m['start_time'] <= t <= m['end_time']:
+                return m
+        return None
+
+    def _velocity_in_move(self, m, t):
+        dt = t - m['start_time']
+        if dt < 0.0 or dt > (m['accel_t'] + m['cruise_t'] + m['decel_t']):
             return None
 
-    def _get_trapq_point(self, print_time):
-        if self.motion_report is None or print_time is None:
-            return (None, None)
-        try:
-            dtrapq = self.motion_report.dtrapqs.get(self.extruder_name)
-            if dtrapq is None:
-                return (None, None)
-            pos, vel = dtrapq.get_trapq_position(print_time)
-            return (float(pos), float(vel))
-        except Exception:
-            return (None, None)
+        accel_t = m['accel_t']
+        cruise_t = m['cruise_t']
+        decel_t = m['decel_t']
+        start_v = m['start_v']
+        cruise_v = m['cruise_v']
+        accel = m['accel']
+
+        if dt <= accel_t:
+            return start_v + accel * dt
+
+        dt -= accel_t
+        if dt <= cruise_t:
+            return cruise_v
+
+        dt -= cruise_t
+        if dt <= decel_t:
+            return cruise_v - accel * dt
+
+        return None
+
+    def _planned_velocity_at(self, t):
+        m = self._find_move_at(t)
+        if m is None:
+            return None
+        return self._velocity_in_move(m, t)
 
     def get_status(self, eventtime):
-        est_print_time = self._get_estimated_print_time(eventtime)
-        queue_end_print_time = self._get_queue_end_print_time()
+        est = self._estimated_print_time(eventtime)
+        self._prune(est)
 
-        queue_tail_s = None
-        if est_print_time is not None and queue_end_print_time is not None:
-            queue_tail_s = max(0.0, queue_end_print_time - est_print_time)
+        queue_end = self._moves[-1]['end_time'] if self._moves else est
+        tail = None
+        if est is not None and queue_end is not None:
+            tail = max(0.0, float(queue_end) - float(est))
 
-        samples = {}
-        if est_print_time is not None:
-            for dt in self.lookahead_points:
-                pos, vel = self._get_trapq_point(est_print_time + dt)
-                samples[dt] = (pos, vel)
-        else:
-            for dt in self.lookahead_points:
-                samples[dt] = (None, None)
-
-        self.status.update({
-            'available': bool(self.toolhead is not None and self.motion_report is not None),
+        out = {
+            'available': self.status['available'],
             'extruder': self.extruder_name,
-            'estimated_print_time': est_print_time,
-            'queue_end_print_time': queue_end_print_time,
-            'queue_tail_s': queue_tail_s,
-            'planned_pos_now': samples[0.0][0],
-            'planned_v_now': samples[0.0][1],
-            'planned_pos_250ms': samples[0.25][0],
-            'planned_v_250ms': samples[0.25][1],
-            'planned_pos_500ms': samples[0.5][0],
-            'planned_v_500ms': samples[0.5][1],
-            'planned_pos_1000ms': samples[1.0][0],
-            'planned_v_1000ms': samples[1.0][1],
-            'data_source': 'trapq',
-        })
+            'estimated_print_time': est,
+            'queue_end_print_time': queue_end,
+            'queue_tail_s': tail,
+            'data_source': 'enqueue_mirror',
+        }
+
+        if est is not None:
+            for key, offset in HORIZONS:
+                out[key] = self._planned_velocity_at(est + offset)
+        else:
+            for key, _offset in HORIZONS:
+                out[key] = None
+
+        self.status.update(out)
         return dict(self.status)
 
 

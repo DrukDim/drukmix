@@ -147,3 +147,20 @@ The branch should produce enough data to answer:
 4. is the available lead large enough to justify pump feedforward?
 5. what is the minimum tunable set needed if feedforward is adopted?
 
+## Current research method
+
+Current experimental probe strategy:
+
+- do not use `motion_report` as the primary source for future extruder plan;
+- mirror extruder moves when Klipper calls `PrinterExtruder.process_move()`;
+- compute planned future extruder velocity from the mirrored queue;
+- keep `queue_tail_s` as a separate indicator of planner horizon depth.
+
+Why:
+
+Earlier experiments showed that `queue_tail_s` can be large while `motion_report`-based future reads still returned no usable future velocity samples.
+That means planner depth exists, but the previous read path was not the right source for forward-looking samples.
+
+This research path remains instrumentation-only.
+It does not change print behavior or pump behavior.
+
