@@ -22,6 +22,23 @@ from backend.bridge_usb_transport import BridgeUsbTransport
 from backend.backend_pumptpl import PumpTplBackend
 
 
+PLANNER_HORIZONS = (
+    ("planned_v_now", 0.0),
+    ("planned_v_250ms", 0.250),
+    ("planned_v_500ms", 0.500),
+    ("planned_v_1000ms", 1.000),
+    ("planned_v_2000ms", 2.000),
+    ("planned_v_4000ms", 4.000),
+    ("planned_v_6000ms", 6.000),
+    ("planned_v_8000ms", 8.000),
+    ("planned_v_10000ms", 10.000),
+    ("planned_v_12000ms", 12.000),
+    ("planned_v_15000ms", 15.000),
+)
+
+PLANNER_FIELD_NAMES = ["queue_tail_s"] + [name for name, _ in PLANNER_HORIZONS]
+
+
 def clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
 
@@ -49,6 +66,8 @@ class Cfg:
     min_flow_hold_s: float
     retract_deadband_mms: float
     retract_gain_pct: float
+    pump_start_lookahead_s: float
+    pump_stop_lookahead_s: float
 
     update_hz: float
     log_period_s: float
@@ -75,7 +94,10 @@ class KlipperState:
     is_paused: bool = False
     klippy_state: str = "unknown"
     extrude_factor: float = 1.0
-    live_extruder_velocity: float = 0.0
+    planner_queue_tail_s: float = 0.0
+    planner_values: Dict[str, Optional[float]] = dataclasses.field(
+        default_factory=lambda: {name: None for name, _ in PLANNER_HORIZONS}
+    )
 
 
 @dataclasses.dataclass
@@ -140,6 +162,8 @@ def load_config(path: str) -> Cfg:
         min_flow_hold_s=_get_float(s, "min_flow_hold_s", 0.0),
         retract_deadband_mms=_get_float(s, "retract_deadband_mms", 0.20),
         retract_gain_pct=_get_float(s, "retract_gain_pct", 100.0),
+        pump_start_lookahead_s=_get_float(s, "pump_start_lookahead_s", 6.0),
+        pump_stop_lookahead_s=_get_float(s, "pump_stop_lookahead_s", 1.0),
 
         update_hz=_get_float(s, "update_hz", 6.0),
         log_period_s=_get_float(s, "log_period_s", 5.0),
@@ -203,6 +227,15 @@ def liters_per_mm_from_diameter_mm(d: float) -> float:
     return area_mm2 / 1_000_000.0
 
 
+def _safe_float(v: Any, default: float = 0.0) -> float:
+    try:
+        if v is None:
+            return default
+        return float(v)
+    except Exception:
+        return default
+
+
 def apply_status(ks: KlipperState, st: Dict[str, Any]) -> None:
     if "print_stats" in st and "state" in st["print_stats"]:
         ks.print_state = str(st["print_stats"]["state"])
@@ -217,11 +250,13 @@ def apply_status(ks: KlipperState, st: Dict[str, Any]) -> None:
             ks.extrude_factor = float(st["gcode_move"]["extrude_factor"])
         except Exception:
             ks.extrude_factor = 1.0
-    if "motion_report" in st and "live_extruder_velocity" in st["motion_report"]:
-        try:
-            ks.live_extruder_velocity = float(st["motion_report"]["live_extruder_velocity"])
-        except Exception:
-            ks.live_extruder_velocity = 0.0
+    if "drukmix_planner_probe" in st and isinstance(st["drukmix_planner_probe"], dict):
+        pp = st["drukmix_planner_probe"]
+        if "queue_tail_s" in pp:
+            ks.planner_queue_tail_s = _safe_float(pp.get("queue_tail_s"), 0.0)
+        for name, _ in PLANNER_HORIZONS:
+            if name in pp:
+                ks.planner_values[name] = None if pp.get(name) is None else _safe_float(pp.get(name), 0.0)
 
 
 def is_printing(ks: KlipperState) -> bool:
@@ -232,10 +267,26 @@ def is_printing(ks: KlipperState) -> bool:
     return it == "printing"
 
 
-def pump_should_run(cfg: Cfg, ks: KlipperState, target_pct: float) -> bool:
+def planner_velocity_at(ks: KlipperState, lookahead_s: float) -> float:
+    lookahead_s = max(0.0, float(lookahead_s))
+    for name, horizon_s in PLANNER_HORIZONS:
+        if horizon_s >= lookahead_s:
+            v = ks.planner_values.get(name)
+            return 0.0 if v is None else max(0.0, float(v))
+    last_name, _ = PLANNER_HORIZONS[-1]
+    v = ks.planner_values.get(last_name)
+    return 0.0 if v is None else max(0.0, float(v))
+
+
+def select_control_velocity(cfg: Cfg, ks: KlipperState, pump_running_hint: bool) -> float:
+    lookahead_s = cfg.pump_stop_lookahead_s if pump_running_hint else cfg.pump_start_lookahead_s
+    return planner_velocity_at(ks, lookahead_s)
+
+
+def pump_should_run(cfg: Cfg, control_velocity: float, target_pct: float) -> bool:
     if target_pct > 0.5:
         return True
-    return abs(float(ks.live_extruder_velocity)) > max(0.1, float(cfg.min_print_mms))
+    return abs(float(control_velocity)) > max(0.1, float(cfg.min_print_mms))
 
 
 async def wait_moonraker_ready(log, ws_url: str, timeout_s: float = 30.0):
@@ -250,6 +301,7 @@ async def wait_moonraker_ready(log, ws_url: str, timeout_s: float = 30.0):
             last_err = e
             await asyncio.sleep(0.5)
     raise RuntimeError(f"Moonraker not ready: {last_err}")
+
 
 class MoonrakerClient:
     def __init__(self, ws_url: str, cfg: Cfg):
@@ -314,7 +366,7 @@ class MoonrakerClient:
                 "idle_timeout": ["state"],
                 "pause_resume": ["is_paused"],
                 "gcode_move": ["extrude_factor"],
-                "motion_report": ["live_extruder_velocity"],
+                "drukmix_planner_probe": PLANNER_FIELD_NAMES,
                 "webhooks": ["state", "state_message"],
             }
         })
@@ -414,7 +466,7 @@ async def maybe_respond(mr, ui_notify: bool, level: str, msg: str):
         pass
 
 
-def build_status_text(st, cfg: Cfg) -> str:
+def build_status_text(st, cfg: Cfg, ks: KlipperState, control_velocity: float) -> str:
     return (
         f"DrukMix: backend={st.backend} link_ok={int(st.link_ok)} "
         f"mode={st.control_mode} running={-1 if st.running is None else int(bool(st.running))} "
@@ -422,6 +474,8 @@ def build_status_text(st, cfg: Cfg) -> str:
         f"fault={int(st.faulted)} code={st.fault_code} "
         f"fault_text={st.fault_text} "
         f"target_pct={st.target_pct} age_ms={st.age_ms} "
+        f"queue_tail_s={ks.planner_queue_tail_s:.3f} ctrl_vel={control_velocity:.3f} "
+        f"start_lookahead_s={cfg.pump_start_lookahead_s} stop_lookahead_s={cfg.pump_stop_lookahead_s} "
         f"max_flow_lpm={cfg.max_flow_lpm} gain_pct={cfg.gain_pct} "
         f"min_print_mms={cfg.min_print_mms} min_flow_pct={cfg.min_flow_pct} hold_s={cfg.min_flow_hold_s}"
     )
@@ -445,7 +499,14 @@ async def run_agent(cfg_path: str):
 
     filament_d = read_filament_diameter_from_printer_cfg(cfg.printer_cfg, cfg.filament_diameter_fallback)
     liters_per_mm = liters_per_mm_from_diameter_mm(filament_d)
-    log.info(f"drukmix: start filament_d={filament_d} liters/mm={liters_per_mm:.6f} gain_pct={cfg.gain_pct}")
+    log.info(
+        "drukmix: start filament_d=%s liters/mm=%.6f gain_pct=%s start_lookahead_s=%s stop_lookahead_s=%s",
+        filament_d,
+        liters_per_mm,
+        cfg.gain_pct,
+        cfg.pump_start_lookahead_s,
+        cfg.pump_stop_lookahead_s,
+    )
 
     mr = None
     backoff = 0.5
@@ -487,7 +548,7 @@ async def run_agent(cfg_path: str):
                         "idle_timeout": ["state"],
                         "pause_resume": ["is_paused"],
                         "gcode_move": ["extrude_factor"],
-                        "motion_report": ["live_extruder_velocity"],
+                        "drukmix_planner_probe": PLANNER_FIELD_NAMES,
                         "webhooks": ["state", "state_message"],
                     }
                 })
@@ -506,6 +567,7 @@ async def run_agent(cfg_path: str):
             last_fault_notify_key = None
             suppress_fault_until = 0.0
             pump_offline_since = None
+            last_target_pct = 0.0
 
             while True:
                 now = time.monotonic()
@@ -518,6 +580,7 @@ async def run_agent(cfg_path: str):
 
                 if now - last_cfg_check_t >= max(0.2, cfg.cfg_reload_s):
                     last_cfg_check_t = now
+
                     try:
                         mtime = os.path.getmtime(cfg.cfg_path)
                     except Exception:
@@ -550,22 +613,6 @@ async def run_agent(cfg_path: str):
                         if params and isinstance(params[0], dict):
                             st0 = params[0]
                             apply_status(ks, st0)
-
-                            if (
-                                (not fs.active)
-                                and ("motion_report" in st0)
-                                and ("live_extruder_velocity" in st0["motion_report"])
-                            ):
-                                printing_now = is_printing(ks)
-                                if printing_now and (not ks.is_paused):
-                                    out = core.compute(CoreInput(
-                                        printing=printing_now,
-                                        paused=ks.is_paused,
-                                        live_extruder_velocity=ks.live_extruder_velocity,
-                                        extrude_factor=ks.extrude_factor,
-                                        liters_per_mm=liters_per_mm,
-                                    ), now)
-                                    backend.set_auto_target_pct(out.target_pct, out.rev)
                         continue
 
                     rc = parse_remote_call(msg)
@@ -574,13 +621,24 @@ async def run_agent(cfg_path: str):
 
                     method, params = rc
 
+                    st_for_status = backend.poll_status()
+                    control_velocity_for_status = select_control_velocity(
+                        cfg,
+                        ks,
+                        bool(st_for_status.running) or last_target_pct > 0.5,
+                    )
+
                     if method == "drukmix_ping":
                         await maybe_respond(mr, cfg.ui_notify, "command", "DrukMix: ping OK")
                         continue
 
                     if method == "drukmix_status":
-                        st = backend.poll_status()
-                        await maybe_respond(mr, cfg.ui_notify, "command", build_status_text(st, cfg))
+                        await maybe_respond(
+                            mr,
+                            cfg.ui_notify,
+                            "command",
+                            build_status_text(st_for_status, cfg, ks, control_velocity_for_status),
+                        )
                         continue
 
                     if method == "drukmix_stop":
@@ -588,6 +646,7 @@ async def run_agent(cfg_path: str):
                         fs.pct = 0.0
                         fs.until_t = 0.0
                         backend.stop()
+                        last_target_pct = 0.0
                         if is_printing(ks) and not ks.is_paused:
                             try:
                                 await mr.pause_print()
@@ -603,6 +662,7 @@ async def run_agent(cfg_path: str):
                         fs.pct = pct
                         fs.until_t = (now + dur) if dur > 0 else 0.0
                         backend.set_auto_target_pct(pct, rev=False)
+                        last_target_pct = pct
                         await maybe_respond(mr, cfg.ui_notify, "command", f"DrukMix: FLUSH {pct:.1f}%")
                         continue
 
@@ -651,7 +711,6 @@ async def run_agent(cfg_path: str):
                         continue
 
                 st = backend.poll_status()
-
                 printing = is_printing(ks)
 
                 if hasattr(backend, "maybe_auto_reset_startup_fault"):
@@ -667,6 +726,7 @@ async def run_agent(cfg_path: str):
                 if st.faulted and st.fault_code > 0 and time.monotonic() >= suppress_fault_until:
                     if printing:
                         backend.stop()
+                        last_target_pct = 0.0
                         if st.pause_print and not ks.is_paused:
                             log.warning(
                                 "DBG pause reason=fault print=%s idle=%s paused=%d fault=%d code=%d link_ok=%d mode=%s",
@@ -695,6 +755,12 @@ async def run_agent(cfg_path: str):
                 else:
                     last_fault_notify_key = None
 
+                control_velocity = select_control_velocity(
+                    cfg,
+                    ks,
+                    bool(st.running) or last_target_pct > 0.5,
+                )
+
                 if fs.active:
                     target_pct = fs.pct
                     rev = False
@@ -703,7 +769,7 @@ async def run_agent(cfg_path: str):
                     out = core.compute(CoreInput(
                         printing=printing,
                         paused=ks.is_paused,
-                        live_extruder_velocity=ks.live_extruder_velocity,
+                        live_extruder_velocity=control_velocity,
                         extrude_factor=ks.extrude_factor,
                         liters_per_mm=liters_per_mm,
                     ), now)
@@ -713,10 +779,12 @@ async def run_agent(cfg_path: str):
 
                 if stop:
                     backend.stop()
+                    last_target_pct = 0.0
                 else:
                     backend.set_auto_target_pct(target_pct, rev)
+                    last_target_pct = target_pct
 
-                should_run_now = pump_should_run(cfg, ks, target_pct)
+                should_run_now = pump_should_run(cfg, control_velocity, target_pct)
 
                 if st.link_ok or (not printing) or ks.is_paused or (not should_run_now):
                     pump_offline_since = None
@@ -741,14 +809,14 @@ async def run_agent(cfg_path: str):
                     and (offline_by_age or offline_by_time)
                 ):
                     log.warning(
-                        "DBG pause reason=pump_offline print=%s idle=%s paused=%d link_ok=%d age_ms=%s mode=%s vel=%.3f target_pct=%.2f should_run=%d off_age=%d off_time=%d",
+                        "DBG pause reason=pump_offline print=%s idle=%s paused=%d link_ok=%d age_ms=%s mode=%s ctrl_vel=%.3f target_pct=%.2f should_run=%d off_age=%d off_time=%d",
                         ks.print_state,
                         ks.idle_state,
                         int(ks.is_paused),
                         int(st.link_ok),
                         st.age_ms,
                         st.control_mode,
-                        ks.live_extruder_velocity,
+                        control_velocity,
                         target_pct,
                         int(should_run_now),
                         int(offline_by_age),
@@ -762,13 +830,13 @@ async def run_agent(cfg_path: str):
 
                 if cfg.pause_on_manual_mode and printing and (not ks.is_paused) and st.control_mode != "AUTO":
                     log.warning(
-                        "DBG pause reason=manual_mode print=%s idle=%s paused=%d mode=%s link_ok=%d vel=%.3f target_pct=%.2f",
+                        "DBG pause reason=manual_mode print=%s idle=%s paused=%d mode=%s link_ok=%d ctrl_vel=%.3f target_pct=%.2f",
                         ks.print_state,
                         ks.idle_state,
                         int(ks.is_paused),
                         st.control_mode,
                         int(st.link_ok),
-                        ks.live_extruder_velocity,
+                        control_velocity,
                         target_pct,
                     )
                     try:
@@ -780,14 +848,15 @@ async def run_agent(cfg_path: str):
                 if now - last_log_t >= max(0.2, cfg.log_period_s):
                     last_log_t = now
                     log.info(
-                        "drukmix: backend=%s mode=%s print=%s idle=%s paused=%d klippy=%s vel=%.3f ef=%.3f target_pct=%.2f rev=%d link_ok=%d fault=%d code=%d age_ms=%s",
+                        "drukmix: backend=%s mode=%s print=%s idle=%s paused=%d klippy=%s tail_s=%.3f ctrl_vel=%.3f ef=%.3f target_pct=%.2f rev=%d link_ok=%d fault=%d code=%d age_ms=%s start_lookahead_s=%.3f stop_lookahead_s=%.3f",
                         st.backend,
                         st.control_mode,
                         ks.print_state,
                         ks.idle_state,
                         int(ks.is_paused),
                         ks.klippy_state,
-                        ks.live_extruder_velocity,
+                        ks.planner_queue_tail_s,
+                        control_velocity,
                         ks.extrude_factor,
                         target_pct,
                         int(rev),
@@ -795,6 +864,8 @@ async def run_agent(cfg_path: str):
                         int(st.faulted),
                         st.fault_code,
                         st.age_ms,
+                        cfg.pump_start_lookahead_s,
+                        cfg.pump_stop_lookahead_s,
                     )
 
                 await asyncio.sleep(1.0 / max(cfg.update_hz, 0.5))
