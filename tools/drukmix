@@ -22,9 +22,11 @@ PRINTER_LOG_DIR="${PRINTER_LOG_DIR:-$USER_HOME/printer_data/logs}"
 
 CFG_TEMPLATE="$REPO_DIR/config_examples/drukmix.cfg"
 MACROS_TEMPLATE="$REPO_DIR/config_examples/drukmix_macros.cfg"
+RESEARCH_TEMPLATE="$REPO_DIR/config_examples/drukmix_research.cfg"
 
 CFG_DST="$PRINTER_CFG_DIR/drukmix.cfg"
 MACROS_DST="$PRINTER_CFG_DIR/drukmix_macros.cfg"
+RESEARCH_DST="$PRINTER_CFG_DIR/drukmix_research.cfg"
 
 PRINTER_CFG="$PRINTER_CFG_DIR/printer.cfg"
 SERVICE_TEMPLATE="$REPO_DIR/systemd/drukmix.service"
@@ -38,6 +40,7 @@ require_repo() {
   test -f "$REPO_DIR/drukmix_agent.py"
   test -f "$CFG_TEMPLATE"
   test -f "$MACROS_TEMPLATE"
+  test -f "$RESEARCH_TEMPLATE"
   test -f "$SERVICE_TEMPLATE"
 }
 
@@ -111,6 +114,15 @@ install_macros_if_missing() {
   fi
 }
 
+install_research_if_missing() {
+  if [[ ! -f "$RESEARCH_DST" ]]; then
+    cp "$RESEARCH_TEMPLATE" "$RESEARCH_DST"
+    echo "Installed default research config: $RESEARCH_DST"
+  else
+    echo "Keeping existing research config: $RESEARCH_DST"
+  fi
+}
+
 patch_cfg_if_needed() {
   CFG_DST="$CFG_DST" USER_HOME="$USER_HOME" PRINTER_LOG_DIR="$PRINTER_LOG_DIR" python3 - <<'PY'
 from pathlib import Path
@@ -147,13 +159,14 @@ print(f"patched {p}")
 PY
 }
 
-ensure_macro_include() {
-  PRINTER_CFG="$PRINTER_CFG" python3 - <<'PY'
+ensure_include_once() {
+  local include_line="$1"
+  PRINTER_CFG="$PRINTER_CFG" INCLUDE_LINE="$include_line" python3 - <<'PY'
 from pathlib import Path
 import os
 
 p = Path(os.environ["PRINTER_CFG"])
-needle = "[include drukmix_macros.cfg]"
+needle = os.environ["INCLUDE_LINE"]
 
 lines = p.read_text().splitlines()
 out = []
@@ -170,8 +183,13 @@ if not seen:
     out.append(needle)
 
 p.write_text("\n".join(out) + "\n")
-print(f"normalized {p}")
+print(f"normalized {p} with {needle}")
 PY
+}
+
+ensure_required_includes() {
+  ensure_include_once "[include drukmix_macros.cfg]"
+  ensure_include_once "[include drukmix_research.cfg]"
 }
 
 install_service() {
@@ -242,8 +260,9 @@ do_install() {
   compile_check
   install_cfg_if_missing
   install_macros_if_missing
+  install_research_if_missing
   patch_cfg_if_needed
-  ensure_macro_include
+  ensure_required_includes
   install_service
   reload_udev_rules
   if wait_for_bridge_alias; then
@@ -262,6 +281,9 @@ do_update() {
   git -C "$REPO_DIR" pull --ff-only
   ensure_venv
   compile_check
+  install_research_if_missing
+  patch_cfg_if_needed
+  ensure_required_includes
   install_service
   reload_udev_rules
   install_klipper_extra_if_present
@@ -276,6 +298,8 @@ do_purge() {
   sudo systemctl daemon-reload
 
   rm -f "$MACROS_DST"
+  rm -f "$RESEARCH_DST"
+  rm -f "$KLIPPER_EXTRA_DST"
 
   echo
   echo "Purge completed."
@@ -308,6 +332,7 @@ do_status() {
   echo "printer log dir: $PRINTER_LOG_DIR"
   echo "config: $CFG_DST"
   echo "macros: $MACROS_DST"
+  echo "research config: $RESEARCH_DST"
   echo "service: $SERVICE_DST"
   echo "klipper dir: $KLIPPER_DIR"
   echo "experimental klipper extra: $KLIPPER_EXTRA_DST"
@@ -342,6 +367,7 @@ do_doctor() {
   [[ -f "$CFG_DST" ]] && echo "config: ok ($CFG_DST)" || echo "config: missing ($CFG_DST)"
   [[ -f "$PRINTER_CFG" ]] && echo "printer.cfg: ok ($PRINTER_CFG)" || echo "printer.cfg: missing ($PRINTER_CFG)"
   [[ -f "$MACROS_DST" ]] && echo "macros: ok ($MACROS_DST)" || echo "macros: missing ($MACROS_DST)"
+  [[ -f "$RESEARCH_DST" ]] && echo "research config: ok ($RESEARCH_DST)" || echo "research config: missing ($RESEARCH_DST)"
   [[ -f "$SERVICE_DST" ]] && echo "service file: ok ($SERVICE_DST)" || echo "service file: missing ($SERVICE_DST)"
   [[ -f "$KLIPPER_EXTRA_DST" ]] && echo "experimental klipper extra: ok ($KLIPPER_EXTRA_DST)" || echo "experimental klipper extra: missing ($KLIPPER_EXTRA_DST)"
 

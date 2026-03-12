@@ -79,6 +79,7 @@ Rules for such branches:
 - the experiment must preserve truth labels and safety gates;
 - instrumentation should be preferred before direct behavior changes;
 - installer changes for experimental extras should be safe, explicit, and low-risk;
+- experimental config/includes must also be repo-driven and reproducible;
 - experimental deployment must not silently redefine the canonical production model.
 
 ## Change procedure

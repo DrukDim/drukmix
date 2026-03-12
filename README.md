@@ -113,8 +113,10 @@ Research direction:
 See:
 - `docs/research/planner_feedforward.md`
 - `klipper_extra/drukmix_planner_probe.py`
+- `config_examples/drukmix_research.cfg`
 
 This research is experimental and is not yet canonical runtime behavior.
+The research config should be installed from repo via `./tools/drukmix install` or `./tools/drukmix update`, not by ad hoc printer-side edits.
 
 ## Workflow
 
