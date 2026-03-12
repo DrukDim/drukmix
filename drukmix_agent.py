@@ -267,20 +267,22 @@ def is_printing(ks: KlipperState) -> bool:
     return it == "printing"
 
 
-def planner_velocity_at(ks: KlipperState, lookahead_s: float) -> float:
+def planner_velocity_at(ks: KlipperState, lookahead_s: float) -> tuple[float, float]:
     lookahead_s = max(0.0, float(lookahead_s))
     for name, horizon_s in PLANNER_HORIZONS:
         if horizon_s >= lookahead_s:
             v = ks.planner_values.get(name)
-            return 0.0 if v is None else max(0.0, float(v))
-    last_name, _ = PLANNER_HORIZONS[-1]
+            return (0.0 if v is None else max(0.0, float(v)), float(horizon_s))
+    last_name, last_h = PLANNER_HORIZONS[-1]
     v = ks.planner_values.get(last_name)
-    return 0.0 if v is None else max(0.0, float(v))
+    return (0.0 if v is None else max(0.0, float(v)), float(last_h))
 
 
-def select_control_velocity(cfg: Cfg, ks: KlipperState, pump_running_hint: bool) -> float:
-    lookahead_s = cfg.pump_stop_lookahead_s if pump_running_hint else cfg.pump_start_lookahead_s
-    return planner_velocity_at(ks, lookahead_s)
+def select_control_velocity(cfg: Cfg, ks: KlipperState, pump_running_hint: bool) -> tuple[float, float, float]:
+    requested_lookahead_s = cfg.pump_stop_lookahead_s if pump_running_hint else cfg.pump_start_lookahead_s
+    effective_lookahead_s = min(max(0.0, float(requested_lookahead_s)), max(0.0, float(ks.planner_queue_tail_s)))
+    vel, selected_horizon_s = planner_velocity_at(ks, effective_lookahead_s)
+    return vel, requested_lookahead_s, selected_horizon_s
 
 
 def pump_should_run(cfg: Cfg, control_velocity: float, target_pct: float) -> bool:
