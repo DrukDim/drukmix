@@ -99,7 +99,6 @@ Even if only one path is currently active in practice, canonical naming and arch
 
 ### Backend-local semantics stay local
 
-
 ## Device identity and attachment rules
 
 Stable device identity is an architectural concern, not only an installer convenience.
@@ -158,6 +157,26 @@ It may include policy logic such as:
 - debounce state transitions;
 - pause or suppress command emission;
 - maintain requested target through orchestration rules.
+
+This layer may also use anticipatory signals if they are explicitly labeled as planned future demand and not mistaken for measured delivery truth.
+
+### Planned-motion feedforward research rule
+
+A temporary research path may evaluate planner-derived extruder motion as a host-side anticipatory input.
+
+Architectural rule for that research:
+
+- planned motion is allowed as host-side feedforward input;
+- planned motion is not device truth;
+- planned motion is not measured material flow;
+- live motion, pause state, fault state, and transport/device truth remain authoritative runtime gates.
+
+This preserves separation between:
+- intended future demand
+- current host runtime context
+- delivered command state
+- device-reported state
+- physical truth
 
 ### Backend command
 
@@ -240,7 +259,8 @@ Examples:
 - current requested target;
 - whether control is suppressed by print state;
 - whether pause was triggered by orchestration policy;
-- whether command emission is intentionally inhibited.
+- whether command emission is intentionally inhibited;
+- whether anticipatory feedforward is active.
 
 This is not device truth.
 It is orchestration truth.
@@ -258,6 +278,7 @@ Every important control/status field should be treated according to what kind of
 
 Canonical truth classes include:
 
+- `planned`
 - `requested`
 - `delivered`
 - `acknowledged`
@@ -267,69 +288,13 @@ Canonical truth classes include:
 
 Rules:
 
+- do not rename `planned` values to look like measured or delivered truth;
 - do not rename `backend_reported` values to look like `measured`;
 - do not rename `acknowledged` values to look like delivered physical action;
 - do not treat stale values as current truth;
 - do not let cleaner naming hide weaker truth semantics.
 
 If a field is not truly measured, do not imply that it is measured.
+If a field is only planner-derived, say so.
 If a field is only backend-reported, say so.
 If a field is only transport-fresh, say so.
-
-## Telemetry rules
-
-Telemetry must represent reality as honestly as possible.
-
-Rules:
-
-- no synthetic telemetry should be presented as physical truth;
-- no guessed values should be labeled as measured;
-- no cosmetic rename should increase semantic certainty;
-- reporting path must preserve distinction between command target, backend-reported result, and physical fact.
-
-Truth-preserving naming is preferred over aesthetically simpler naming.
-
-## Fault-handling rules
-
-Fault handling must remain explicit about ownership.
-
-Possible owners include:
-- device-side fault behavior,
-- transport failure handling,
-- backend-level interpretation,
-- host orchestration response.
-
-Do not collapse all fault behavior into a single ambiguous “fault” concept if the recovery semantics differ by layer.
-
-Host pause behavior, backend fault state, and transport disconnect are related but not equivalent.
-
-## Refactor constraints
-
-Refactors must preserve:
-
-- layer separation;
-- truth-preserving field semantics;
-- multi-backend architectural viability;
-- explicit command/status ownership;
-- repository-documented deployment reality.
-
-Refactors must not optimize for code neatness by erasing meaning.
-
-## Documentation alignment rules
-
-When architecture changes:
-
-- update `README.md` if canonical overview changed;
-- update `ARCHITECTURE.md` for structural or semantic changes;
-- update `AGENTS.md` if operational guidance changed;
-- update `WORKFLOW.md` if deployment/verification procedure changed;
-- update `KNOWN_ISSUES.md` if an issue was introduced, clarified, or verified as fixed.
-
-## Default stance
-
-If there is tension between:
-- elegant abstraction and truthful semantics,
-- backend convenience and multi-backend architecture,
-- transport simplicity and correct ownership boundaries,
-
-choose truthful semantics, correct ownership boundaries, and multi-backend architectural integrity.

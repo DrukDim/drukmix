@@ -85,7 +85,7 @@ Status: active architectural constraint
 
 The project has already gone through corrections related to fake or misleading host telemetry semantics.
 
-Fields must not be renamed or presented in a way that turns backend-reported values, command intent, or transport freshness into measured physical truth.
+Fields must not be renamed or presented in a way that turns backend-reported values, command intent, transport freshness, or planned future demand into measured physical truth.
 
 Implication:
 
@@ -96,6 +96,7 @@ Related areas:
 
 - backend-normalized status
 - host-visible telemetry
+- planner-derived host signals
 - README / ARCHITECTURE semantic definitions
 
 ### 5. Deployment reality must stay aligned with canonical documented paths and roles
@@ -175,42 +176,61 @@ Related areas:
 - pump-node provisioning
 - install workflow
 
+### 9. Planner-derived pump feedforward is not yet verified and must remain experimental
+
+Status: active research constraint
+
+Using Klipper planned extruder motion as an anticipatory pump-control input may materially improve concrete delivery timing, but it can also diverge from runtime truth during pause, fault, or queue-drain situations.
+
+Implication:
+
+- planned motion must not replace live-state gating;
+- the available planner lead time must be measured on the actual machine;
+- instrumentation should precede direct pump-control integration.
+
+Related areas:
+
+- Klipper trapq / motion report
+- planner lead time
+- DrukMix host orchestration
+- experimental Klipper extra
+
 ## Active checklist
 
 These items are intentionally preserved from the prior canonical checklist.
 Some are architectural tasks rather than single-point bugs, but they remain open and must not be lost.
 
-### 9. Normalize README so it stays the single source of truth for project overview, current deployment model, and active constraints
+### 10. Normalize README so it stays the single source of truth for project overview, current deployment model, and active constraints
 
 Status: active checklist item
 
 README must stay aligned with the actual deployed model and must not drift behind working reality.
 
-### 10. Remove accidental VFD-overfitting from canonical project description
+### 11. Remove accidental VFD-overfitting from canonical project description
 
 Status: active checklist item
 
 The project must stay multi-backend in its canonical description even if `pumpvfd` is the currently active field path.
 
-### 11. Make backend boundaries explicit: generic host logic vs backend-specific logic
+### 12. Make backend boundaries explicit: generic host logic vs backend-specific logic
 
 Status: active checklist item
 
 Shared host logic and backend-specific behavior still need continued clarification and enforcement in both docs and implementation.
 
-### 12. Define command ownership and status ownership by layer
+### 13. Define command ownership and status ownership by layer
 
 Status: active checklist item
 
 This has been partially documented, but it remains an active tracked item until fully reflected in architecture and code semantics.
 
-### 13. Define field-truth categories for operator-visible status semantics
+### 14. Define field-truth categories for operator-visible status semantics
 
 Status: active checklist item
 
 Operator-visible status must stay explicitly classified by truth type and must not collapse different certainty levels into one ambiguous status surface.
 
-### 14. Reconcile command success with telemetry truth
+### 15. Reconcile command success with telemetry truth
 
 Status: active checklist item
 
@@ -218,88 +238,50 @@ Current system can physically run while normalized telemetry still reports zero 
 
 This mismatch remains a tracked issue until semantics and behavior are fully reconciled.
 
-### 15. Audit bridge / pump status path for stale or delayed telemetry
+### 16. Audit bridge / pump status path for stale or delayed telemetry
 
 Status: active checklist item
 
 Status freshness and propagation path still need explicit audit.
 
-### 16. Audit why `transport_link_ok` intermittently drops during otherwise idle/healthy operation
+### 17. Audit why `transport_link_ok` intermittently drops during otherwise idle/healthy operation
 
 Status: active checklist item
 
 Intermittent link-state drops remain tracked and must be investigated rather than normalized away.
 
-### 17. Classify current operator-visible fields as `requested`, `delivered`, `acknowledged`, `backend_reported`, `measured`, or `stale`
+### 18. Classify current operator-visible fields as `planned`, `requested`, `delivered`, `acknowledged`, `backend_reported`, `measured`, or `stale`
 
 Status: active checklist item
 
 This remains necessary to keep operator-visible semantics truth-preserving.
 
-### 18. Separate requested target, delivered command, backend-reported output, and real physical output in naming and architecture
+### 19. Separate requested target, delivered command, backend-reported output, and real physical output in naming and architecture
 
 Status: active checklist item
 
 This remains an active naming and architecture requirement.
 
-### 19. Remove misleading host field `applied_pct` from the canonical host model
+### 20. Remove misleading host field `applied_pct` from the canonical host model
 
 Status: active checklist item
 
 Misleading host-visible fields must not remain canonical just because they are historically convenient.
 
-### 20. Add rename / semantics clarification plan for misleading status fields
+### 21. Add rename / semantics clarification plan for misleading status fields
 
 Status: active checklist item
 
 Any rename effort must be planned, explicit, and truth-preserving.
 
-### 21. Reduce unnecessary translation layers where the same command is reinterpreted multiple times
+### 22. Reduce unnecessary translation layers where the same command is reinterpreted multiple times
 
 Status: active checklist item
 
 Translation layers should be reduced only where meaning is preserved and ownership boundaries stay correct.
 
-### 22. Separate AUTO motion-derived commands from operator commands in architecture and naming
+### 23. Instrument and measure planner lead time before adopting planner-derived pump feedforward
 
 Status: active checklist item
 
-AUTO-derived control and operator-issued control must not be semantically collapsed.
-
-### 23. Preserve working Err16 behavior while simplifying architecture
-
-Status: active checklist item
-
-Architecture cleanup must not regress currently working Err16 handling.
-
-### 24. Preserve TPL-specific stop semantics while simplifying architecture
-
-Status: active checklist item
-
-Simplification must not destroy backend-specific safety-critical stop semantics.
-
-### 25. Define refactor order that does not require rediscovering backend-specific safety rules
-
-Status: active checklist item
-
-Refactor sequencing must preserve already learned backend safety knowledge instead of forcing rediscovery.
-
-### 26. Reduce deployment dependence on fixed host/layout assumptions
-
-Status: active checklist item
-
-Current deployment is still tied to a specific Linux + systemd + Klipper/Moonraker/Mainsail-style environment and expected directory layout.
-
-This must remain explicit until portability is intentionally implemented and verified.
-
-### 27. Define intentional bridge and node identity strategy
-
-Status: active checklist item
-
-The project needs a clearer long-term strategy for bridge/pump identity than generic USB naming plus host-side alias rules.
-
-### 28. Define canonical flashing/provisioning workflow for blank bridge and pump devices
-
-Status: active checklist item
-
-Future installer/provisioning work must define how a blank device is flashed, identified, attached, and brought into the canonical runtime model.
+The project needs measured evidence from the actual machine before planner-derived feedforward becomes canonical host behavior.

@@ -65,8 +65,21 @@ Current normal repository-driven deployment model is:
    - ensure `[include drukmix_macros.cfg]` exists in `printer.cfg`;
    - reload udev rules;
    - wait for `/dev/drukos-bridge`;
+   - install the experimental Klipper extra if the expected Klipper tree exists;
    - restart the service;
 4. verify runtime behavior.
+
+## Temporary research-branch workflow
+
+A temporary research branch may add experimental instrumentation that is not yet canonical production behavior.
+
+Rules for such branches:
+
+- the branch must state clearly that the work is experimental;
+- the experiment must preserve truth labels and safety gates;
+- instrumentation should be preferred before direct behavior changes;
+- installer changes for experimental extras should be safe, explicit, and low-risk;
+- experimental deployment must not silently redefine the canonical production model.
 
 ## Change procedure
 
@@ -97,6 +110,12 @@ Examples of acceptable verification:
 - observed runtime behavior matches intended control semantics;
 - telemetry meaning is still truthful;
 - fault handling still behaves as documented.
+
+For experimental planner instrumentation, acceptable verification also includes:
+- the experimental Klipper extra is installed at the expected location;
+- Klipper loads the extra without breaking printer startup;
+- planner-derived signals can be read and compared against live extruder velocity;
+- research logs make clear which values are planned, live, requested, or backend-reported.
 
 Examples of insufficient verification:
 

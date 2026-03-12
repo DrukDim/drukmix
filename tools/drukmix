@@ -30,6 +30,10 @@ PRINTER_CFG="$PRINTER_CFG_DIR/printer.cfg"
 SERVICE_TEMPLATE="$REPO_DIR/systemd/drukmix.service"
 SERVICE_DST="/etc/systemd/system/drukmix.service"
 
+KLIPPER_DIR="${KLIPPER_DIR:-$USER_HOME/klipper}"
+KLIPPER_EXTRA_SRC="$REPO_DIR/klipper_extra/drukmix_planner_probe.py"
+KLIPPER_EXTRA_DST="$KLIPPER_DIR/klippy/extras/drukmix_planner_probe.py"
+
 require_repo() {
   test -f "$REPO_DIR/drukmix_agent.py"
   test -f "$CFG_TEMPLATE"
@@ -180,6 +184,57 @@ restart_service() {
   sudo systemctl restart drukmix.service
 }
 
+wait_for_bridge_alias() {
+  local n=0
+  while [[ $n -lt 20 ]]; do
+    if [[ -e /dev/drukos-bridge ]]; then
+      return 0
+    fi
+    sleep 0.5
+    n=$((n+1))
+  done
+  return 1
+}
+
+reload_udev_rules() {
+  if command -v udevadm >/dev/null 2>&1; then
+    sudo udevadm control --reload-rules || true
+    sudo udevadm trigger || true
+    udevadm settle || true
+  fi
+}
+
+install_klipper_extra_if_present() {
+  if [[ ! -f "$KLIPPER_EXTRA_SRC" ]]; then
+    echo "klipper extra source missing: $KLIPPER_EXTRA_SRC"
+    return 0
+  fi
+
+  if [[ ! -d "$KLIPPER_DIR/klippy/extras" ]]; then
+    echo "klipper extras dir not found, skipping experimental extra: $KLIPPER_DIR/klippy/extras"
+    return 0
+  fi
+
+  install -m 0644 "$KLIPPER_EXTRA_SRC" "$KLIPPER_EXTRA_DST"
+  echo "installed experimental klipper extra: $KLIPPER_EXTRA_DST"
+}
+
+bridge_status() {
+  if [[ -L /dev/drukos-bridge || -e /dev/drukos-bridge ]]; then
+    echo "bridge alias: ok (/dev/drukos-bridge)"
+    readlink -f /dev/drukos-bridge 2>/dev/null | sed 's/^/bridge target: /'
+  else
+    echo "bridge alias: missing (/dev/drukos-bridge)"
+  fi
+
+  if [[ -d /dev/serial/by-id ]]; then
+    echo "serial by-id:"
+    ls -1 /dev/serial/by-id 2>/dev/null | sed 's/^/  /' || true
+  else
+    echo "serial by-id: missing dir"
+  fi
+}
+
 do_install() {
   require_repo
   require_paths
@@ -196,6 +251,7 @@ do_install() {
   else
     echo "WARNING: /dev/drukos-bridge not present after install"
   fi
+  install_klipper_extra_if_present
   restart_service
   do_status
 }
@@ -207,6 +263,8 @@ do_update() {
   ensure_venv
   compile_check
   install_service
+  reload_udev_rules
+  install_klipper_extra_if_present
   restart_service
   do_status
 }
@@ -251,6 +309,8 @@ do_status() {
   echo "config: $CFG_DST"
   echo "macros: $MACROS_DST"
   echo "service: $SERVICE_DST"
+  echo "klipper dir: $KLIPPER_DIR"
+  echo "experimental klipper extra: $KLIPPER_EXTRA_DST"
 
   echo
   echo "== service =="
@@ -267,47 +327,7 @@ do_status() {
 }
 
 do_logs() {
-  if [[ -f "$PRINTER_LOG_DIR/drukmix.log" ]]; then
-    tail -n 100 -f "$PRINTER_LOG_DIR/drukmix.log"
-  else
-    journalctl -u drukmix.service -n 100 -f
-  fi
-}
-
-wait_for_bridge_alias() {
-  local n=0
-  while [[ $n -lt 20 ]]; do
-    if [[ -e /dev/drukos-bridge ]]; then
-      return 0
-    fi
-    sleep 0.5
-    n=$((n+1))
-  done
-  return 1
-}
-
-reload_udev_rules() {
-  if command -v udevadm >/dev/null 2>&1; then
-    sudo udevadm control --reload-rules || true
-    sudo udevadm trigger || true
-    udevadm settle || true
-  fi
-}
-
-bridge_status() {
-  if [[ -L /dev/drukos-bridge || -e /dev/drukos-bridge ]]; then
-    echo "bridge alias: ok (/dev/drukos-bridge)"
-    readlink -f /dev/drukos-bridge 2>/dev/null | sed 's/^/bridge target: /'
-  else
-    echo "bridge alias: missing (/dev/drukos-bridge)"
-  fi
-
-  if [[ -d /dev/serial/by-id ]]; then
-    echo "serial by-id:"
-    ls -1 /dev/serial/by-id 2>/dev/null | sed 's/^/  /' || true
-  else
-    echo "serial by-id: missing dir"
-  fi
+  tail -n 200 -F "$PRINTER_LOG_DIR/drukmix.log"
 }
 
 do_doctor() {
@@ -323,6 +343,7 @@ do_doctor() {
   [[ -f "$PRINTER_CFG" ]] && echo "printer.cfg: ok ($PRINTER_CFG)" || echo "printer.cfg: missing ($PRINTER_CFG)"
   [[ -f "$MACROS_DST" ]] && echo "macros: ok ($MACROS_DST)" || echo "macros: missing ($MACROS_DST)"
   [[ -f "$SERVICE_DST" ]] && echo "service file: ok ($SERVICE_DST)" || echo "service file: missing ($SERVICE_DST)"
+  [[ -f "$KLIPPER_EXTRA_DST" ]] && echo "experimental klipper extra: ok ($KLIPPER_EXTRA_DST)" || echo "experimental klipper extra: missing ($KLIPPER_EXTRA_DST)"
 
   echo
   bridge_status
@@ -333,16 +354,20 @@ do_doctor() {
   echo
 }
 
-case "${1:-}" in
+usage() {
+  cat <<USAGE
+Usage: $0 <install|update|purge|restart|status|logs|doctor>
+USAGE
+}
+
+cmd="${1:-}"
+case "$cmd" in
   install) do_install ;;
-  update)  do_update ;;
-  purge)   do_purge ;;
+  update) do_update ;;
+  purge) do_purge ;;
   restart) do_restart ;;
-  status)  do_status ;;
-  logs)    do_logs ;;
-  doctor)  do_doctor ;;
-  *)
-    echo "usage: drukmix {install|update|purge|restart|status|logs|doctor}"
-    exit 1
-    ;;
+  status) do_status ;;
+  logs) do_logs ;;
+  doctor) do_doctor ;;
+  *) usage; exit 2 ;;
 esac

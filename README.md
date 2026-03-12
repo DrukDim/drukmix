@@ -101,6 +101,21 @@ That is operationally sufficient for the current Linux + udev installation model
 
 The project should move toward clearer and more intentional device identity for bridge and pump nodes, especially for first-install and multi-machine deployment scenarios.
 
+## Planned-motion feedforward research
+
+A temporary research branch may be used to evaluate planner-aware pump feedforward.
+
+Research direction:
+- use planned extruder motion as an anticipatory host-side signal;
+- keep live extruder motion and print/pause/fault state as hard runtime gates;
+- do not treat planned motion as measured material delivery truth.
+
+See:
+- `docs/research/planner_feedforward.md`
+- `klipper_extra/drukmix_planner_probe.py`
+
+This research is experimental and is not yet canonical runtime behavior.
+
 ## Workflow
 
 Canonical workflow:
@@ -131,7 +146,8 @@ Current known limitations include:
 - the currently deployed live path is `pumpvfd`, even though the architecture is intended to remain multi-backend;
 - telemetry semantics are still being cleaned up to better separate requested, delivered, backend-reported, and real physical state;
 - bridge USB identity is still generic at the base USB-device level and currently depends on udev aliasing for stable attachment;
-- flashing and first-install provisioning of blank bridge/pump ESP-based devices is not yet a canonicalized installer workflow.
+- flashing and first-install provisioning of blank bridge/pump ESP-based devices is not yet a canonicalized installer workflow;
+- planned-motion feedforward is still experimental research and not yet a canonicalized host-control path.
 
 ## Project documents
 
@@ -140,6 +156,7 @@ Current known limitations include:
 - `WORKFLOW.md` — canonical change / deploy / verify procedure
 - `ARCHITECTURE.md` — canonical architectural layers and semantics
 - `KNOWN_ISSUES.md` — confirmed defects, active constraints, and open checklist items
+- `docs/research/planner_feedforward.md` — temporary research plan for planner-aware feedforward
 
 ## Notes
 
