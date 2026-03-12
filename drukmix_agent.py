@@ -278,11 +278,16 @@ def planner_velocity_at(ks: KlipperState, lookahead_s: float) -> tuple[float, fl
     return (0.0 if v is None else max(0.0, float(v)), float(last_h))
 
 
-def select_control_velocity(cfg: Cfg, ks: KlipperState, pump_running_hint: bool) -> tuple[float, float, float]:
+def select_control_velocity_meta(cfg: Cfg, ks: KlipperState, pump_running_hint: bool) -> tuple[float, float, float]:
     requested_lookahead_s = cfg.pump_stop_lookahead_s if pump_running_hint else cfg.pump_start_lookahead_s
     effective_lookahead_s = min(max(0.0, float(requested_lookahead_s)), max(0.0, float(ks.planner_queue_tail_s)))
     vel, selected_horizon_s = planner_velocity_at(ks, effective_lookahead_s)
     return vel, requested_lookahead_s, selected_horizon_s
+
+
+def select_control_velocity(cfg: Cfg, ks: KlipperState, pump_running_hint: bool) -> float:
+    vel, _, _ = select_control_velocity_meta(cfg, ks, pump_running_hint)
+    return vel
 
 
 def pump_should_run(cfg: Cfg, control_velocity: float, target_pct: float) -> bool:
