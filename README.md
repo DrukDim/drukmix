@@ -17,7 +17,7 @@ DrukMix connects print-side motion and operator commands to a concrete material 
 
 Current host control chain:
 
-`Klipper macro -> Moonraker remote method -> DrukMix agent -> backend -> bridge USB protocol -> ESP-NOW bridge -> pump node -> hardware driver`
+`Klipper macro -> Moonraker remote method -> DrukMix agent -> backend -> bridge USB transport -> bridge node / link -> pump node -> hardware driver`
 
 The current deployed field path is `pumpvfd`, but the project is intended to remain multi-backend.
 
@@ -31,26 +31,75 @@ Current backend families:
 
 The current live/deployed path is `pumpvfd`, but upper layers should not become permanently backend-locked.
 
+## Current deployment model
+
+DrukMix is currently deployed from a normal repository checkout and runs directly from that checkout.
+
+Current canonical deployment layout:
+- source repo: `/home/drukos/drukmix`
+- systemd unit: `/etc/systemd/system/drukmix.service`
+- active config file: `/home/drukos/printer_data/config/drukmix.cfg`
+- active macros file: `/home/drukos/printer_data/config/drukmix_macros.cfg`
+- active printer config: `/home/drukos/printer_data/config/printer.cfg`
+- runtime log: `/home/drukos/printer_data/logs/drukmix.log`
+- default example config templates in repo:
+  - `config_examples/drukmix.cfg`
+  - `config_examples/drukmix_macros.cfg`
+
+The live config and macro files are intentionally placed in the printer config directory so they can be viewed and edited through the normal Klipper / Mainsail config UI.
+
+The `config_examples/` files are installer defaults and repository templates.
+They are not the live machine-side source of truth after install.
+
 ## Operating assumptions
 
 DrukMix currently assumes a deployment environment built around:
+- Linux
+- systemd
 - Klipper
 - Moonraker
 - Mainsail
 - a separate `drukmix` agent service
-- the current canonical deployment layout used in this repository
+- a printer config directory under the active user home
+- udev-based stable serial aliasing for the bridge device
 
-Current canonical deployment layout:
-- source repo: `/home/drukos/drukmix`
-- runtime app dir: `/opt/drukmix`
-- runtime config dir: `/etc/drukmix`
-- active config file: `/etc/drukmix/drukmix.cfg`
-- active macros file: `/home/drukos/printer_data/config/drukmix_macros.cfg`
-- systemd unit: `/etc/systemd/system/drukmix.service`
-- runtime log: `/var/log/drukmix/drukmix.log`
+Current normal install flow expects a host environment where the helper can:
+- create a Python virtual environment;
+- install Python dependencies;
+- install / reload a systemd unit;
+- install or keep live config files under `~/printer_data/config`;
+- reload udev rules and wait for the bridge alias to appear.
 
-This means the project is currently documented and tested around the existing `drukos`-style deployment assumptions.
-User/path portability is not yet a finished goal and should be treated as an active limitation, not as a solved feature.
+## Host prerequisites
+
+Current practical host-side requirements include:
+- `python3`
+- `python3-venv`
+- `pip` via the venv bootstrap flow
+- `systemd`
+- `curl`
+- `udevadm`
+- `getent` or an equivalent way to resolve the current user home directory
+
+Python package dependencies are listed in `requirements.txt`.
+
+Non-Python host tools are operating-system requirements and are not tracked in `requirements.txt`.
+
+## USB bridge identity
+
+The current installation flow expects the bridge serial device to become available as:
+
+`/dev/drukos-bridge`
+
+This is currently achieved through Linux `udev` rules and a stable USB-identity match.
+
+At the moment, the bridge is still seen by the OS using a generic CP2102-style USB identity such as:
+
+`usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0`
+
+That is operationally sufficient for the current Linux + udev installation model, but it is not yet the desired long-term device identity strategy.
+
+The project should move toward clearer and more intentional device identity for bridge and pump nodes, especially for first-install and multi-machine deployment scenarios.
 
 ## Workflow
 
@@ -70,15 +119,19 @@ Current verified state:
 - host stack is Klipper + Moonraker + Mainsail + a separate `drukmix` agent service;
 - deployed backend is currently `pumpvfd`;
 - the command path is working;
+- example-based live config install is working;
+- install now waits for `/dev/drukos-bridge` before service restart;
 - telemetry and status semantics are still under active cleanup and clarification.
 
 ## Current limitations
 
 Current known limitations include:
-- deployment still assumes the current `drukos`-style layout and fixed canonical paths;
-- user/path portability is not solved yet;
+- deployment is still oriented around the current Linux + systemd + Klipper/Moonraker/Mainsail environment;
+- live deployment portability to other host layouts is not yet a finished goal;
 - the currently deployed live path is `pumpvfd`, even though the architecture is intended to remain multi-backend;
-- telemetry semantics are still being cleaned up to better separate requested, delivered, backend-reported, and real physical state.
+- telemetry semantics are still being cleaned up to better separate requested, delivered, backend-reported, and real physical state;
+- bridge USB identity is still generic at the base USB-device level and currently depends on udev aliasing for stable attachment;
+- flashing and first-install provisioning of blank bridge/pump ESP-based devices is not yet a canonicalized installer workflow.
 
 ## Project documents
 

@@ -26,7 +26,8 @@ Canonical source of truth is the repository.
 Rules:
 
 - deployment must be performed from committed repo state, not from ad hoc manual edits on the printer;
-- runtime files under `/opt/drukmix` and `/etc/drukmix` are deployed artifacts, not authoring sources;
+- the repository checkout is the canonical executable source;
+- live files under `~/printer_data/config` are machine-side active files, but not automatically the canonical authoring source;
 - printer-side changes are not canonical until committed back into the repository;
 - quick fixes made directly on the machine must be treated as temporary only.
 
@@ -37,15 +38,35 @@ If runtime state and repo state diverge, repo state must be updated or the runti
 Current canonical deployment layout:
 
 - source repo: `/home/drukos/drukmix`
-- runtime app dir: `/opt/drukmix`
-- runtime config dir: `/etc/drukmix`
-- active config file: `/etc/drukmix/drukmix.cfg`
-- active macros file: `/home/drukos/printer_data/config/drukmix_macros.cfg`
 - systemd unit: `/etc/systemd/system/drukmix.service`
-- runtime log: `/var/log/drukmix/drukmix.log`
+- active config file: `/home/drukos/printer_data/config/drukmix.cfg`
+- active macros file: `/home/drukos/printer_data/config/drukmix_macros.cfg`
+- active printer config: `/home/drukos/printer_data/config/printer.cfg`
+- runtime log: `/home/drukos/printer_data/logs/drukmix.log`
+- template/default config files in repo:
+  - `config_examples/drukmix.cfg`
+  - `config_examples/drukmix_macros.cfg`
 
-These paths must not be changed casually.
+These paths and roles must not be changed casually.
 If changed, the new layout must be reflected in canonical docs.
+
+## Normal install/update model
+
+Current normal repository-driven deployment model is:
+
+1. clone or update repo checkout;
+2. run `./tools/drukmix install` or `./tools/drukmix update`;
+3. let the helper:
+   - create/update `.venv`;
+   - install Python dependencies;
+   - install the systemd unit;
+   - install default live config/macros only if missing;
+   - patch live config paths if needed;
+   - ensure `[include drukmix_macros.cfg]` exists in `printer.cfg`;
+   - reload udev rules;
+   - wait for `/dev/drukos-bridge`;
+   - restart the service;
+4. verify runtime behavior.
 
 ## Change procedure
 
@@ -70,6 +91,8 @@ Verification must be tied to real machine semantics.
 Examples of acceptable verification:
 
 - service starts correctly;
+- `./tools/drukmix doctor` shows expected files and expected bridge alias state;
+- `/dev/drukos-bridge` exists and resolves to the intended serial device;
 - expected command path works end-to-end;
 - observed runtime behavior matches intended control semantics;
 - telemetry meaning is still truthful;
@@ -81,6 +104,19 @@ Examples of insufficient verification:
 - "service restarted without error";
 - "field names look nicer";
 - "UI appears plausible" without checking machine truth.
+
+## Bridge and device attachment rules
+
+Current normal runtime depends on a stable Linux bridge alias:
+
+`/dev/drukos-bridge`
+
+Rules:
+
+- service restart should happen only after the expected bridge alias is present or an explicit warning is emitted;
+- bridge attachment must be verified during install/doctor flows;
+- generic host-visible USB naming must not be treated as a durable canonical identity model;
+- future first-install / blank-device provisioning must be documented explicitly when it becomes canonical.
 
 ## Debugging rules
 

@@ -99,6 +99,24 @@ Even if only one path is currently active in practice, canonical naming and arch
 
 ### Backend-local semantics stay local
 
+
+## Device identity and attachment rules
+
+Stable device identity is an architectural concern, not only an installer convenience.
+
+Rules:
+
+- host attachment must prefer explicit and stable device identity over incidental host-local enumeration;
+- transport attachment must not depend on fragile `/dev/ttyUSB*` ordering;
+- Linux `udev` aliasing is an acceptable current implementation mechanism, but it is not the same thing as a fully solved canonical device identity strategy;
+- generic USB bridge identity must not be confused with intentional project-level device identity;
+- first-install / blank-device provisioning must be treated as a distinct lifecycle stage from normal steady-state runtime attachment.
+
+Implication:
+
+- a device that is operationally reachable is not automatically well-identified;
+- future bridge/pump flashing and provisioning work must preserve the separation between device identity, transport attachment, and runtime control semantics.
+
 Backend-specific semantics must remain backend-local unless explicitly promoted into canonical shared meaning.
 
 Do not let:
