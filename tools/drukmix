@@ -1,239 +1,280 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ENV_FILE="/etc/drukmix.env"
-if [[ -f "$ENV_FILE" ]]; then
-  # shellcheck disable=SC1090
-  source "$ENV_FILE"
-fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+USER_NAME="$(id -un)"
+USER_HOME="$(getent passwd "$USER_NAME" | cut -d: -f6)"
+PRINTER_CFG_DIR="${PRINTER_CFG_DIR:-$USER_HOME/printer_data/config}"
 
-# -------------------- Paths (override via /etc/drukmix.env) --------------------
-DRUKMIX_REPO="${DRUKMIX_REPO:-/home/drukos/drukmix}"
+CFG_TEMPLATE="$REPO_DIR/config/drukmix.cfg"
+CFG_DST="$PRINTER_CFG_DIR/drukmix.cfg"
 
-# live/runtime
-DRUKMIX_AGENT_LIVE="${DRUKMIX_AGENT_LIVE:-/opt/drukmix/drukmix_agent.py}"
-DRUKMIX_CFG="${DRUKMIX_CFG:-/etc/drukmix/drukmix.cfg}"
-DRUKMIX_MACROS="${DRUKMIX_MACROS:-/home/drukos/printer_data/config/drukmix_macros.cfg}"
-DRUKMIX_UNIT="${DRUKMIX_UNIT:-/etc/systemd/system/drukmix.service}"
-DRUKMIX_SERVICE="${DRUKMIX_SERVICE:-drukmix.service}"
-DRUKMIX_LOG="${DRUKMIX_LOG:-/var/log/drukmix/drukmix.log}"
+MACROS_SRC="$REPO_DIR/config/drukmix_macros.cfg"
+MACROS_DST="$PRINTER_CFG_DIR/drukmix_macros.cfg"
 
-# repo/source-of-truth
-REPO_AGENT="$DRUKMIX_REPO/drukmix_agent.py"
-REPO_CFG="$DRUKMIX_REPO/config/drukmix.cfg"
-REPO_MACROS="$DRUKMIX_REPO/config/drukmix_macros.cfg"
-REPO_UNIT="$DRUKMIX_REPO/systemd/drukmix.service"
-REPO_HELPER="$DRUKMIX_REPO/tools/drukmix"
+PRINTER_CFG="$PRINTER_CFG_DIR/printer.cfg"
+SERVICE_TEMPLATE="$REPO_DIR/systemd/drukmix.service"
+SERVICE_DST="/etc/systemd/system/drukmix.service"
 
-die(){ echo "ERROR: $*" >&2; exit 2; }
-
-need_repo(){
-  [[ -d "$DRUKMIX_REPO/.git" ]] || die "repo not found: $DRUKMIX_REPO (set DRUKMIX_REPO in $ENV_FILE)"
+require_repo() {
+  test -f "$REPO_DIR/drukmix_agent.py"
+  test -f "$CFG_TEMPLATE"
+  test -f "$MACROS_SRC"
+  test -f "$SERVICE_TEMPLATE"
 }
 
-ensure_repo_dirs(){
-  mkdir -p "$DRUKMIX_REPO/config" "$DRUKMIX_REPO/systemd" "$DRUKMIX_REPO/tools" "$DRUKMIX_REPO/agent"
+require_paths() {
+  if [[ ! -d "$PRINTER_CFG_DIR" ]]; then
+    echo "Printer config dir not found: $PRINTER_CFG_DIR"
+    exit 2
+  fi
+  if [[ ! -f "$PRINTER_CFG" ]]; then
+    echo "printer.cfg not found: $PRINTER_CFG"
+    exit 2
+  fi
 }
 
-cmd_help(){
-  cat <<'TXT'
-drukmix — helper (repo <-> live) + git workflow
-
-Core ideas:
-  - repo is source of truth: /home/drukos/drukmix
-  - live files are runtime: ~/printer_data/config + /etc/systemd
-  - agent runs from /opt/drukmix runtime path
-  - during bring-up/debug, capture/publish are allowed
-
-Commands:
-  drukmix help
-  drukmix status                 show paths + systemd status
-  drukmix diff                   diff live vs repo (core files only)
-
-  drukmix capture                copy LIVE -> REPO (no git)
-  drukmix publish "msg"          capture + git add/commit/push
-
-  drukmix fetch                  git pull --ff-only in repo
-  drukmix apply                  copy REPO -> LIVE + daemon-reload + restart agent
-  drukmix update                 fetch + apply + klipper-restart
-
-  drukmix restart                restart drukmix.service
-  drukmix klipper-restart        Klipper RESTART via Moonraker
-  drukmix logs                   tail agent log
-  drukmix journal                last 150 lines of journal
-
-  drukmix install-self           install this helper to /usr/local/bin/drukmix
-
-Notes:
-  - helper copies cfg/macros/unit into live locations
-  - agent runtime path: /opt/drukmix/drukmix_agent.py
-  - capture/publish are kept intentionally for printer-side debugging
-TXT
+ensure_python() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "python3 not found"
+    exit 2
+  fi
+  if ! python3 -m venv --help >/dev/null 2>&1; then
+    echo "python3-venv is required"
+    echo "Install with: sudo apt-get update && sudo apt-get install -y python3-venv"
+    exit 2
+  fi
 }
 
-cmd_status(){
-  need_repo
-  echo "Repo:           $DRUKMIX_REPO"
-  echo "Repo agent:     $REPO_AGENT"
-  echo "Repo cfg:       $REPO_CFG"
-  echo "Repo macros:    $REPO_MACROS"
-  echo "Repo unit:      $REPO_UNIT"
-  echo "Repo helper:    $REPO_HELPER"
-  echo
-  echo "Live agent:     $DRUKMIX_AGENT_LIVE"
-  echo "Live cfg:       $DRUKMIX_CFG"
-  echo "Live macros:    $DRUKMIX_MACROS"
-  echo "Live unit:      $DRUKMIX_UNIT"
-  echo "Service:        $DRUKMIX_SERVICE"
-  echo
-  systemctl status "$DRUKMIX_SERVICE" --no-pager || true
+ensure_venv() {
+  ensure_python
+
+  if [[ ! -x "$REPO_DIR/.venv/bin/python" ]]; then
+    python3 -m venv "$REPO_DIR/.venv"
+  fi
+
+  "$REPO_DIR/.venv/bin/python" -m pip install --upgrade pip setuptools wheel
+
+  if [[ -f "$REPO_DIR/requirements.txt" ]]; then
+    "$REPO_DIR/.venv/bin/pip" install -r "$REPO_DIR/requirements.txt"
+  fi
 }
 
-cmd_diff(){
-  need_repo
-  echo "=== agent diff ==="
-  diff -u "$DRUKMIX_AGENT_LIVE" "$REPO_AGENT" || true
-  echo
-  echo "=== cfg diff ==="
-  diff -u "$DRUKMIX_CFG" "$REPO_CFG" || true
-  echo
-  echo "=== macros diff ==="
-  diff -u "$DRUKMIX_MACROS" "$REPO_MACROS" || true
-  echo
-  echo "=== unit diff ==="
-  sudo diff -u "$DRUKMIX_UNIT" "$REPO_UNIT" || true
-  echo
-  echo "=== helper diff (system vs repo) ==="
-  if [[ -f /usr/local/bin/drukmix ]]; then
-    sudo diff -u /usr/local/bin/drukmix "$REPO_HELPER" || true
+compile_check() {
+  "$REPO_DIR/.venv/bin/python" -m py_compile \
+    "$REPO_DIR/drukmix_agent.py" \
+    "$REPO_DIR/backend/pump_backend_base.py" \
+    "$REPO_DIR/backend/backend_pumpvfd.py" \
+    "$REPO_DIR/backend/backend_pumptpl.py" \
+    "$REPO_DIR/backend/bridge_usb_transport.py" \
+    "$REPO_DIR/backend/agent_core_logic.py" \
+    "$REPO_DIR/backend/vfd_faults.py"
+}
+
+install_cfg_if_missing() {
+  if [[ ! -f "$CFG_DST" ]]; then
+    cp "$CFG_TEMPLATE" "$CFG_DST"
+    echo "Installed default config: $CFG_DST"
   else
-    echo "(system helper not installed)"
+    echo "Keeping existing config: $CFG_DST"
   fi
 }
 
-cmd_capture(){
-  need_repo
-  ensure_repo_dirs
-  echo "Capture LIVE -> REPO"
+patch_cfg() {
+  python3 - <<PY
+from pathlib import Path
+import os
 
-  [[ -f "$DRUKMIX_AGENT_LIVE" ]] || die "missing live agent: $DRUKMIX_AGENT_LIVE"
-  [[ -f "$DRUKMIX_CFG" ]] || die "missing live cfg: $DRUKMIX_CFG"
-  [[ -f "$DRUKMIX_MACROS" ]] || die "missing live macros: $DRUKMIX_MACROS"
-  [[ -f "$DRUKMIX_UNIT" ]] || die "missing live unit: $DRUKMIX_UNIT"
+p = Path(os.environ["CFG_DST"])
+user_home = os.environ["USER_HOME"]
+s = p.read_text()
 
-  cp -f "$DRUKMIX_AGENT_LIVE" "$REPO_AGENT"
-  chmod +x "$REPO_AGENT" || true
-  cp -f "$DRUKMIX_CFG" "$REPO_CFG"
-  cp -f "$DRUKMIX_MACROS" "$REPO_MACROS"
-  sudo cp -f "$DRUKMIX_UNIT" "$REPO_UNIT"
-
-  if [[ -f /usr/local/bin/drukmix ]]; then
-    sudo cp -f /usr/local/bin/drukmix "$REPO_HELPER" || true
-  fi
-
-  echo "OK: captured to repo. Review with: cd $DRUKMIX_REPO && git status"
+repl = {
+    "/home/dan/": user_home + "/",
+    "/home/drukos/": user_home + "/",
+    "printer_cfg = /home/dan/printer_data/config/printer.cfg": f"printer_cfg = {user_home}/printer_data/config/printer.cfg",
+    "printer_cfg = /home/drukos/printer_data/config/printer.cfg": f"printer_cfg = {user_home}/printer_data/config/printer.cfg",
 }
 
-cmd_publish(){
-  need_repo
-  local msg="${1:-}"
-  [[ -n "$msg" ]] || die "usage: drukmix publish \"commit message\""
+for a, b in repl.items():
+    s = s.replace(a, b)
 
-  cmd_capture
-  git -C "$DRUKMIX_REPO" add -A
-  git -C "$DRUKMIX_REPO" status
-  git -C "$DRUKMIX_REPO" commit -m "$msg"
-  git -C "$DRUKMIX_REPO" push origin main
-  echo "OK: published to GitHub"
+if "printer_cfg =" not in s:
+    s += f"\nprinter_cfg = {user_home}/printer_data/config/printer.cfg\n"
+
+p.write_text(s)
+print(f"patched {p}")
+PY
 }
 
-cmd_fetch(){
-  need_repo
-
-  if [[ -d "$DRUKMIX_REPO/.git/rebase-apply" || -d "$DRUKMIX_REPO/.git/rebase-merge" ]]; then
-    die "git rebase in progress in repo. Resolve or abort first."
-  fi
-  if [[ -f "$DRUKMIX_REPO/.git/MERGE_HEAD" ]]; then
-    die "git merge in progress in repo. Resolve or abort first."
-  fi
-
-  git -C "$DRUKMIX_REPO" pull --ff-only
-  echo "OK: fetched latest repo"
+install_macros_link() {
+  rm -f "$MACROS_DST"
+  ln -s "$MACROS_SRC" "$MACROS_DST"
+  echo "Linked macros: $MACROS_DST -> $MACROS_SRC"
 }
 
-cmd_apply(){
-  need_repo
-  echo "Apply REPO -> LIVE"
+ensure_macro_include() {
+  python3 - <<PY
+from pathlib import Path
+import os
 
-  [[ -f "$REPO_AGENT" ]] || die "missing repo agent: $REPO_AGENT"
-  [[ -f "$REPO_CFG" ]] || die "missing repo cfg: $REPO_CFG"
-  [[ -f "$REPO_MACROS" ]] || die "missing repo macros: $REPO_MACROS"
-  [[ -f "$REPO_UNIT" ]] || die "missing repo unit: $REPO_UNIT"
+p = Path(os.environ["PRINTER_CFG"])
+needle = "[include drukmix_macros.cfg]"
 
-  cp -f "$REPO_CFG" "$DRUKMIX_CFG"
-  cp -f "$REPO_MACROS" "$DRUKMIX_MACROS"
-  sudo cp -f "$REPO_UNIT" "$DRUKMIX_UNIT"
+lines = p.read_text().splitlines()
+out = []
+seen = False
 
+for line in lines:
+    if line.strip() == needle:
+        if seen:
+            continue
+        seen = True
+    out.append(line)
+
+if not seen:
+    out.append(needle)
+
+p.write_text("\\n".join(out) + "\\n")
+print(f"normalized {p}")
+PY
+}
+
+install_service() {
+  sudo install -m 0644 "$SERVICE_TEMPLATE" "$SERVICE_DST"
   sudo systemctl daemon-reload
-  sudo systemctl restart "$DRUKMIX_SERVICE"
-
-  echo "OK: applied. Agent runs from repo path."
+  sudo systemctl enable drukmix.service >/dev/null 2>&1 || true
 }
 
-cmd_update(){
-  cmd_fetch
-  cmd_apply
-  cmd_klipper_restart
+restart_service() {
+  sudo systemctl restart drukmix.service
 }
 
-cmd_restart(){
-  sudo systemctl restart "$DRUKMIX_SERVICE"
-  systemctl status "$DRUKMIX_SERVICE" --no-pager || true
+reload_klipper() {
+  curl -s -X POST localhost:7125/printer/gcode/script \
+    -H 'Content-Type: application/json' \
+    -d '{"script":"FIRMWARE_RESTART"}' >/dev/null || true
 }
 
-cmd_klipper_restart(){
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsS localhost:7125/printer/restart >/dev/null
-    echo "Requested Klipper RESTART via Moonraker (localhost:7125)."
-  else
-    die "curl not found"
+do_install() {
+  require_repo
+  require_paths
+  ensure_venv
+  compile_check
+  install_cfg_if_missing
+  CFG_DST="$CFG_DST" USER_HOME="$USER_HOME" patch_cfg
+  install_macros_link
+  PRINTER_CFG="$PRINTER_CFG" ensure_macro_include
+  install_service
+  reload_klipper
+  restart_service
+  do_status
+}
+
+do_update() {
+  require_repo
+  require_paths
+  git -C "$REPO_DIR" pull --ff-only
+  ensure_venv
+  compile_check
+  install_macros_link
+  install_service
+  restart_service
+  do_status
+}
+
+do_purge() {
+  sudo systemctl stop drukmix.service >/dev/null 2>&1 || true
+  sudo systemctl disable drukmix.service >/dev/null 2>&1 || true
+  sudo rm -f "$SERVICE_DST"
+  sudo systemctl daemon-reload
+
+  if [[ -L "$MACROS_DST" || -f "$MACROS_DST" ]]; then
+    rm -f "$MACROS_DST"
+    echo "Removed macros file/link: $MACROS_DST"
   fi
+
+  echo
+  echo "Purge completed."
+  echo "Kept repo: $REPO_DIR"
+  echo "Kept venv: $REPO_DIR/.venv"
+  echo "Kept config: $CFG_DST"
+  echo "printer.cfg was not modified except possible existing include line."
+  echo
+  echo "To remove repo-local venv too, run:"
+  echo "  rm -rf '$REPO_DIR/.venv'"
 }
 
-cmd_logs(){
-  tail -n 160 -f "$DRUKMIX_LOG"
+do_restart() {
+  restart_service
+  do_status
 }
 
-cmd_journal(){
-  sudo journalctl -u "$DRUKMIX_SERVICE" -n 150 --no-pager
+do_status() {
+  echo
+  echo "== repo =="
+  echo "$REPO_DIR"
+  git -C "$REPO_DIR" rev-parse --short HEAD || true
+
+  echo
+  echo "== user =="
+  echo "$USER_NAME"
+  echo "$USER_HOME"
+
+  echo
+  echo "== paths =="
+  echo "printer cfg dir: $PRINTER_CFG_DIR"
+  echo "config: $CFG_DST"
+  echo "macros: $MACROS_DST"
+  echo "service: $SERVICE_DST"
+
+  echo
+  echo "== service =="
+  systemctl status drukmix.service --no-pager -l || true
+
+  echo
+  echo "== moonraker server/info =="
+  curl -s localhost:7125/server/info || true
+  echo
+
+  echo
+  echo "== config preview =="
+  sed -n '1,220p' "$CFG_DST" || true
 }
 
-cmd_install_self(){
-  need_repo
-  [[ -f "$REPO_HELPER" ]] || die "missing repo helper: $REPO_HELPER"
-  sudo install -m 0755 "$REPO_HELPER" /usr/local/bin/drukmix
-  echo "OK: installed helper to /usr/local/bin/drukmix"
+do_logs() {
+  journalctl -u drukmix.service -n 100 -f
 }
 
-main(){
-  local cmd="${1:-help}"
-  shift || true
-  case "$cmd" in
-    help|-h|--help) cmd_help ;;
-    status) cmd_status ;;
-    diff) cmd_diff ;;
-    capture) cmd_capture ;;
-    publish) cmd_publish "${1:-}" ;;
-    fetch) cmd_fetch ;;
-    apply) cmd_apply ;;
-    update) cmd_update ;;
-    restart) cmd_restart ;;
-    klipper-restart) cmd_klipper_restart ;;
-    logs) cmd_logs ;;
-    journal) cmd_journal ;;
-    install-self) cmd_install_self ;;
-    *) die "Unknown command: $cmd (try: drukmix help)" ;;
-  esac
+do_doctor() {
+  echo "== doctor =="
+  echo
+
+  command -v python3 >/dev/null 2>&1 && echo "python3: ok" || echo "python3: missing"
+  command -v curl >/dev/null 2>&1 && echo "curl: ok" || echo "curl: missing"
+  [[ -x "$REPO_DIR/.venv/bin/python" ]] && echo "venv: ok" || echo "venv: missing"
+  [[ -f "$CFG_DST" ]] && echo "config: ok ($CFG_DST)" || echo "config: missing ($CFG_DST)"
+  [[ -f "$PRINTER_CFG" ]] && echo "printer.cfg: ok ($PRINTER_CFG)" || echo "printer.cfg: missing ($PRINTER_CFG)"
+  [[ -L "$MACROS_DST" || -f "$MACROS_DST" ]] && echo "macros: ok ($MACROS_DST)" || echo "macros: missing ($MACROS_DST)"
+  [[ -f "$SERVICE_DST" ]] && echo "service file: ok ($SERVICE_DST)" || echo "service file: missing ($SERVICE_DST)"
+
+  echo
+  echo "Moonraker:"
+  curl -s localhost:7125/server/info || true
+  echo
 }
 
-main "$@"
+case "${1:-}" in
+  install) do_install ;;
+  update)  do_update ;;
+  purge)   do_purge ;;
+  restart) do_restart ;;
+  status)  do_status ;;
+  logs)    do_logs ;;
+  doctor)  do_doctor ;;
+  *)
+    echo "usage: drukmix {install|update|purge|restart|status|logs|doctor}"
+    exit 1
+    ;;
+esac
