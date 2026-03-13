@@ -68,7 +68,7 @@ Current normal install flow expects a host environment where the helper can:
 - install Python dependencies;
 - install / reload a systemd unit;
 - install or keep live config files under `~/printer_data/config`;
-- reload udev rules and wait for the bridge alias to appear.
+- install bridge udev rule, reload udev rules, and wait for the bridge alias to appear.
 
 ## Host prerequisites
 

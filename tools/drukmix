@@ -214,6 +214,17 @@ wait_for_bridge_alias() {
   return 1
 }
 
+install_bridge_udev_rule() {
+  local rules_dir="/etc/udev/rules.d"
+  local rules_file="${rules_dir}/99-drukos-bridge.rules"
+
+  sudo mkdir -p "${rules_dir}"
+  sudo tee "${rules_file}" >/dev/null <<'EOF'
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", ATTRS{serial}=="0001", SYMLINK+="drukos-bridge", MODE:="0660", GROUP:="dialout"
+EOF
+  sudo chmod 0644 "${rules_file}"
+}
+
 reload_udev_rules() {
   if command -v udevadm >/dev/null 2>&1; then
     sudo udevadm control --reload-rules || true
@@ -264,6 +275,7 @@ do_install() {
   patch_cfg_if_needed
   ensure_required_includes
   install_service
+  install_bridge_udev_rule
   reload_udev_rules
   if wait_for_bridge_alias; then
     echo "bridge alias ready: /dev/drukos-bridge -> $(readlink -f /dev/drukos-bridge)"
@@ -285,6 +297,7 @@ do_update() {
   patch_cfg_if_needed
   ensure_required_includes
   install_service
+  install_bridge_udev_rule
   reload_udev_rules
   install_klipper_extra_if_present
   restart_service

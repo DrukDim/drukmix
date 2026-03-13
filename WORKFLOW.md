@@ -63,6 +63,7 @@ Current normal repository-driven deployment model is:
    - install default live config/macros only if missing;
    - patch live config paths if needed;
    - ensure `[include drukmix_macros.cfg]` exists in `printer.cfg`;
+   - install bridge udev rule;
    - reload udev rules;
    - wait for `/dev/drukos-bridge`;
    - install the experimental Klipper extra if the expected Klipper tree exists;
