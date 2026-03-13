@@ -110,6 +110,11 @@ class PumpVfdBackend(PumpBackend):
             target_pct=self._last_target_pct,
             telemetry_ok=True,
             age_ms=raw.get("age_ms"),
+            target_milli_lpm=int(raw.get("target_milli_lpm", -1)),
+            hw_setpoint_raw=int(raw.get("hw_setpoint_raw", -1)),
+            pump_flags=int(raw.get("pump_flags", -1)),
+            last_ack_seq=int(raw.get("last_ack_seq", -1)),
+            applied_code=int(raw.get("applied_code", -1)),
         )
 
     def maybe_auto_reset_startup_fault(self, printing: bool, running: bool | None) -> bool:

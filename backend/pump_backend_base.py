@@ -27,6 +27,11 @@ class PumpStatus:
     target_pct: Optional[float] = None
     telemetry_ok: bool = False
     age_ms: Optional[int] = None
+    target_milli_lpm: int = -1
+    hw_setpoint_raw: int = -1
+    pump_flags: int = -1
+    last_ack_seq: int = -1
+    applied_code: int = -1
 
 
 class PumpBackend:

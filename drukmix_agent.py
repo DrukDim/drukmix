@@ -858,7 +858,7 @@ async def run_agent(cfg_path: str):
                 if now - last_log_t >= max(0.2, cfg.log_period_s):
                     last_log_t = now
                     log.info(
-                        "drukmix: backend=%s mode=%s planner_valid=%d tail_s=%.3f ctrl_vel=%.3f ef=%.3f target_pct=%.2f rev=%d link_ok=%d fault=%d code=%d age_ms=%s start_lookahead_s=%.3f run_lookahead_s=%.3f stop_lookahead_s=%.3f stale_timeout_s=%.3f",
+                        "drukmix: backend=%s mode=%s planner_valid=%d tail_s=%.3f ctrl_vel=%.3f ef=%.3f target_pct=%.2f rev=%d link_ok=%d fault=%d code=%d age_ms=%s target_mlpm=%d hw_raw=%d pump_flags=%d ack_seq=%d applied=%d start_lookahead_s=%.3f run_lookahead_s=%.3f stop_lookahead_s=%.3f stale_timeout_s=%.3f",
                         st.backend,
                         st.control_mode,
                         int(planner_valid),
@@ -871,6 +871,11 @@ async def run_agent(cfg_path: str):
                         int(st.faulted),
                         st.fault_code,
                         st.age_ms,
+                        int(getattr(st, "target_milli_lpm", -1)),
+                        int(getattr(st, "hw_setpoint_raw", -1)),
+                        int(getattr(st, "pump_flags", -1)),
+                        int(getattr(st, "last_ack_seq", -1)),
+                        int(getattr(st, "applied_code", -1)),
                         cfg.pump_start_lookahead_s,
                         cfg.pump_run_lookahead_s,
                         cfg.pump_stop_lookahead_s,
