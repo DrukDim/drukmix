@@ -108,6 +108,16 @@ When suggesting a code or doc change:
    - behavior change
 4. Do not treat unverified assumptions as settled project truth.
 
+## Planner authority rule
+
+For automatic pump orchestration, treat `drukmix_planner_probe` as the canonical printer-side motion authority.
+
+Do not reintroduce `motion_report.live_extruder_velocity`, `print_stats.state`, `pause_resume.is_paused`, `idle_timeout.state`, or `webhooks.state` as automatic pump start/stop gates when planner data is available.
+
+Moonraker may still be used as a transport/API surface, but not as a second semantic authority for motion truth.
+
+Keep backend fault/manual/offline handling and explicit operator actions as separate override paths.
+
 ## Default stance
 
 If there is tension between:

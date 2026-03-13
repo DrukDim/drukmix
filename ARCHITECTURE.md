@@ -160,6 +160,41 @@ It may include policy logic such as:
 
 This layer may also use anticipatory signals if they are explicitly labeled as planned future demand and not mistaken for measured delivery truth.
 
+## Planner-authoritative pump orchestration
+
+For automatic pump control, the canonical printer-side motion authority is planner-derived extruder demand exposed by `drukmix_planner_probe`.
+
+Rules:
+
+- planned extruder demand is the sole printer-side authority for automatic pump start/stop and automatic target generation;
+- `motion_report.live_extruder_velocity` is not a separate control authority;
+- printer lifecycle fields such as `print_stats.state`, `pause_resume.is_paused`, `idle_timeout.state`, and `webhooks.state` are not control gates for automatic pump orchestration;
+- backend fault state, backend mode, transport freshness, and explicit operator actions remain independent override domains.
+
+Implications:
+
+- the pump is treated as a scheduled Klipper-adjacent actuator that follows planner demand rather than re-validating Klipper through secondary host-visible status surfaces;
+- planned demand is still not measured material flow and must not be presented as physical truth;
+- planner freshness must be monitored explicitly; stale planner data must fail safe.
+
+This preserves the separation between:
+- planned printer demand,
+- backend/device health truth,
+- transport truth,
+- operator override actions.
+
+### Planner-only control gate
+
+For automatic orchestration, the existence or absence of valid planner-derived extruder demand is the pump run/stop gate.
+
+This means:
+
+- valid nonzero planner demand -> automatic pumping may occur;
+- no valid planner demand -> automatic pumping should decay to stop;
+- automatic pause/cancel/readiness semantics from printer lifecycle state are not required as additional gates.
+
+Backward pause into the printer remains allowed as a fault/offline/manual-mode reaction, but it is not part of the canonical forward pump-demand decision.
+
 ### Planned-motion feedforward research rule
 
 A temporary research path may evaluate planner-derived extruder motion as a host-side anticipatory input.

@@ -101,22 +101,24 @@ That is operationally sufficient for the current Linux + udev installation model
 
 The project should move toward clearer and more intentional device identity for bridge and pump nodes, especially for first-install and multi-machine deployment scenarios.
 
-## Planned-motion feedforward research
+## Planner-authoritative pump control
 
-A temporary research branch may be used to evaluate planner-aware pump feedforward.
+DrukMix is transitioning from mixed Moonraker-derived motion/lifecycle gating toward planner-authoritative automatic pump control.
 
-Research direction:
-- use planned extruder motion as an anticipatory host-side signal;
-- keep live extruder motion and print/pause/fault state as hard runtime gates;
-- do not treat planned motion as measured material delivery truth.
+Canonical direction:
 
-See:
-- `docs/research/planner_feedforward.md`
+- `drukmix_planner_probe` is the printer-side motion authority for automatic pump orchestration;
+- planner-derived extruder velocity is treated as scheduled future demand;
+- `motion_report.live_extruder_velocity` is not intended to remain a separate control authority;
+- printer lifecycle fields such as `print_stats.state`, `pause_resume`, and `idle_timeout` are not intended to remain automatic pump-control gates;
+- backend fault/manual/offline handling remains independent.
+
+This direction has been validated sufficiently to justify architectural migration, but the final agent cleanup and the exact cold-start / run / stop lookahead policy are still being formalized.
+
+Relevant files:
 - `klipper_extra/drukmix_planner_probe.py`
+- `docs/research/planner_feedforward.md`
 - `config_examples/drukmix_research.cfg`
-
-This research is experimental and is not yet canonical runtime behavior.
-The research config should be installed from repo via `./tools/drukmix install` or `./tools/drukmix update`, not by ad hoc printer-side edits.
 
 ## Workflow
 

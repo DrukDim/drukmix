@@ -112,6 +112,15 @@ Examples of acceptable verification:
 - telemetry meaning is still truthful;
 - fault handling still behaves as documented.
 
+For planner-authoritative changes, verification must include:
+
+- automatic target generation works without depending on `motion_report.live_extruder_velocity`;
+- automatic pump run/stop behavior follows planner-derived demand rather than printer lifecycle state;
+- planner staleness fails safe;
+- backend fault/manual/offline reactions still work;
+- flush / operator override behavior still works;
+- logs make clear which values are planned-demand values and which are backend/device truth.
+
 For experimental planner instrumentation, acceptable verification also includes:
 - the experimental Klipper extra is installed at the expected location;
 - Klipper loads the extra without breaking printer startup;

@@ -176,61 +176,83 @@ Related areas:
 - pump-node provisioning
 - install workflow
 
-### 9. Planner-derived pump feedforward is not yet verified and must remain experimental
+### 9. Planner-authoritative pump control is validated as the intended direction, but migration is incomplete
 
-Status: active research constraint
+Status: active migration constraint
 
-Using Klipper planned extruder motion as an anticipatory pump-control input may materially improve concrete delivery timing, but it can also diverge from runtime truth during pause, fault, or queue-drain situations.
+Planner-derived extruder demand from `drukmix_planner_probe` has been validated as the intended printer-side motion authority for automatic pump control.
+
+However, the host agent still contains transition-era dependencies and semantics that must be removed or formalized.
 
 Implication:
 
-- planned motion must not replace live-state gating;
-- the available planner lead time must be measured on the actual machine;
-- instrumentation should precede direct pump-control integration.
+- mixed authority between planner demand and Moonraker lifecycle/motion fields must not remain indefinitely;
+- final planner-only control semantics, planner freshness handling, and lookahead policy still need explicit canonicalization.
 
 Related areas:
 
-- Klipper trapq / motion report
-- planner lead time
-- DrukMix host orchestration
-- experimental Klipper extra
+- `drukmix_agent.py`
+- `klipper_extra/drukmix_planner_probe.py`
+- planner lookahead policy
+- host orchestration semantics
 
 ## Active checklist
 
 These items are intentionally preserved from the prior canonical checklist.
 Some are architectural tasks rather than single-point bugs, but they remain open and must not be lost.
 
-### 10. Normalize README so it stays the single source of truth for project overview, current deployment model, and active constraints
+### 10. Agent still depends on non-canonical Moonraker lifecycle/motion fields during planner migration
+
+Status: active migration item
+
+Automatic pump control should no longer depend on `motion_report.live_extruder_velocity`, `print_stats.state`, `pause_resume`, `idle_timeout`, or `webhooks` once planner-authoritative orchestration is adopted.
+
+### 11. Planner freshness / staleness guardrail is not yet canonicalized
+
+Status: active control-safety item
+
+Planner-authoritative control requires an explicit rule for when planner data is considered stale and automatic pumping must fail safe.
+
+### 12. Cold-start / run / stop lookahead policy is not yet fully formalized
+
+Status: active control-policy item
+
+The system now needs a canonical multi-phase lookahead policy:
+- longer cold-start lookahead,
+- shorter running lookahead,
+- longer stop lookahead.
+
+### 13. Normalize README so it stays the single source of truth for project overview, current deployment model, and active constraints
 
 Status: active checklist item
 
 README must stay aligned with the actual deployed model and must not drift behind working reality.
 
-### 11. Remove accidental VFD-overfitting from canonical project description
+### 14. Remove accidental VFD-overfitting from canonical project description
 
 Status: active checklist item
 
 The project must stay multi-backend in its canonical description even if `pumpvfd` is the currently active field path.
 
-### 12. Make backend boundaries explicit: generic host logic vs backend-specific logic
+### 15. Make backend boundaries explicit: generic host logic vs backend-specific logic
 
 Status: active checklist item
 
 Shared host logic and backend-specific behavior still need continued clarification and enforcement in both docs and implementation.
 
-### 13. Define command ownership and status ownership by layer
+### 16. Define command ownership and status ownership by layer
 
 Status: active checklist item
 
 This has been partially documented, but it remains an active tracked item until fully reflected in architecture and code semantics.
 
-### 14. Define field-truth categories for operator-visible status semantics
+### 17. Define field-truth categories for operator-visible status semantics
 
 Status: active checklist item
 
 Operator-visible status must stay explicitly classified by truth type and must not collapse different certainty levels into one ambiguous status surface.
 
-### 15. Reconcile command success with telemetry truth
+### 18. Reconcile command success with telemetry truth
 
 Status: active checklist item
 
@@ -238,25 +260,25 @@ Current system can physically run while normalized telemetry still reports zero 
 
 This mismatch remains a tracked issue until semantics and behavior are fully reconciled.
 
-### 16. Audit bridge / pump status path for stale or delayed telemetry
+### 19. Audit bridge / pump status path for stale or delayed telemetry
 
 Status: active checklist item
 
 Status freshness and propagation path still need explicit audit.
 
-### 17. Audit why `transport_link_ok` intermittently drops during otherwise idle/healthy operation
+### 20. Audit why `transport_link_ok` intermittently drops during otherwise idle/healthy operation
 
 Status: active checklist item
 
 Intermittent link-state drops remain tracked and must be investigated rather than normalized away.
 
-### 18. Classify current operator-visible fields as `planned`, `requested`, `delivered`, `acknowledged`, `backend_reported`, `measured`, or `stale`
+### 21. Classify current operator-visible fields as `planned`, `requested`, `delivered`, `acknowledged`, `backend_reported`, `measured`, or `stale`
 
 Status: active checklist item
 
 This remains necessary to keep operator-visible semantics truth-preserving.
 
-### 19. Separate requested target, delivered command, backend-reported output, and real physical output in naming and architecture
+### 22. Separate requested target, delivered command, backend-reported output, and real physical output in naming and architecture
 
 Status: active checklist item
 
