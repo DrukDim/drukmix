@@ -48,13 +48,13 @@ bool Rs485Modbus::txrx_(
   while (VFD_SERIAL.available()) VFD_SERIAL.read();
 
   set_tx_mode_(true);
-  delayMicroseconds(4000);
+  delayMicroseconds(200);
 
   size_t written = VFD_SERIAL.write(tx, tx_len);
   VFD_SERIAL.flush();
 
-  delayMicroseconds(4000);
   set_tx_mode_(false);
+  delayMicroseconds(150);
 
   if (written != tx_len) return false;
 
@@ -119,13 +119,13 @@ bool Rs485Modbus::write_single_register_broadcast(uint16_t reg, uint16_t value) 
   while (VFD_SERIAL.available()) VFD_SERIAL.read();
 
   set_tx_mode_(true);
-  delayMicroseconds(4000);
+  delayMicroseconds(200);
 
   size_t written = VFD_SERIAL.write(tx, sizeof(tx));
   VFD_SERIAL.flush();
 
-  delayMicroseconds(4000);
   set_tx_mode_(false);
+  delayMicroseconds(150);
 
   if (written != sizeof(tx)) return false;
 

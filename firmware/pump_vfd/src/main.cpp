@@ -3,6 +3,9 @@
 #include "pump_vfd_config.h"
 #include "node_identity.h"
 #include "espnow_hello.h"
+
+#define DM_STR_INNER(x) #x
+#define DM_STR(x) DM_STR_INNER(x)
 #ifndef BUILD_GIT_HASH
 #define BUILD_GIT_HASH "dev"
 #endif
@@ -27,7 +30,7 @@ void setup() {
   Serial.print(" label=");
   Serial.print(FW_VER_LABEL);
   Serial.print(" git=");
-  Serial.println(BUILD_GIT_HASH);
+  Serial.println(DM_STR(BUILD_GIT_HASH));
 
   espnow_hello_begin(WIFI_CHANNEL);
   espnow_get_local_uid(&uid_lo, &uid_hi);
