@@ -45,6 +45,7 @@ class DrukMixPlannerProbe:
         self.debug_enabled = config.getboolean('debug_enabled', False)
         self.debug_every_n_moves = config.getint('debug_every_n_moves', 200)
         self._debug_move_counter = 0
+        self.print_velocity_epsilon = config.getfloat('print_velocity_epsilon', 0.001, minval=0.0)
         self.status = {
             'available': False,
             'extruder': self.extruder_name,
@@ -52,6 +53,11 @@ class DrukMixPlannerProbe:
             'queue_end_print_time': None,
             'queue_tail_s': None,
             'data_source': 'enqueue_mirror',
+            'print_window_active': False,
+            'time_to_print_start_s': None,
+            'time_to_print_stop_s': None,
+            'pump_run_command': False,
+            'pump_command_reason': 'idle',
         }
         self.printer.register_event_handler("klippy:connect", self._handle_connect)
 
@@ -100,6 +106,7 @@ class DrukMixPlannerProbe:
                 'cruise_v': float(cruise_v),
                 'accel': float(accel),
                 'start_pos': float(move.start_pos[ea_index]),
+                'axis_r': float(axis_r),
                 'can_pressure_advance': bool(
                     axis_r > 0.0 and (move.axes_d[0] or move.axes_d[1])
                 ),
@@ -177,6 +184,39 @@ class DrukMixPlannerProbe:
             return None
         return self._velocity_in_move(m, t)
 
+    def _is_print_move(self, m):
+        if m is None:
+            return False
+        if m['end_time'] <= m['start_time']:
+            return False
+        if m.get('axis_r', 0.0) <= 0.0:
+            return False
+        if max(abs(m.get('start_v', 0.0)), abs(m.get('cruise_v', 0.0))) <= self.print_velocity_epsilon:
+            return False
+        return True
+
+    def _first_print_move_after(self, est):
+        if est is None:
+            return None
+        for m in self._moves:
+            if not self._is_print_move(m):
+                continue
+            if m['end_time'] < est:
+                continue
+            return m
+        return None
+
+    def _last_print_move_after(self, est):
+        if est is None:
+            return None
+        for m in reversed(self._moves):
+            if not self._is_print_move(m):
+                continue
+            if m['end_time'] < est:
+                continue
+            return m
+        return None
+
     def get_status(self, eventtime):
         est = self._estimated_print_time(eventtime)
         self._prune(est)
@@ -186,6 +226,45 @@ class DrukMixPlannerProbe:
         if est is not None and queue_end is not None:
             tail = max(0.0, float(queue_end) - float(est))
 
+        configfile = self.printer.lookup_object('configfile', None)
+        start_lookahead_s = 0.0
+        stop_lookahead_s = 0.0
+        if configfile is not None:
+            try:
+                start_lookahead_s = float(configfile.status_raw_config['drukmix'].get('pump_start_lookahead_s', 0.0))
+            except Exception:
+                start_lookahead_s = 0.0
+            try:
+                stop_lookahead_s = float(configfile.status_raw_config['drukmix'].get('pump_stop_lookahead_s', 0.0))
+            except Exception:
+                stop_lookahead_s = 0.0
+
+        first_print = self._first_print_move_after(est)
+        last_print = self._last_print_move_after(est)
+
+        time_to_print_start_s = None
+        if est is not None and first_print is not None:
+            time_to_print_start_s = max(0.0, float(first_print['start_time']) - float(est))
+
+        time_to_print_stop_s = None
+        if est is not None and last_print is not None:
+            time_to_print_stop_s = max(0.0, float(last_print['end_time']) - float(est))
+
+        print_window_active = last_print is not None
+
+        pump_run_command = False
+        pump_command_reason = 'idle'
+        if print_window_active:
+            if time_to_print_start_s is not None and time_to_print_start_s <= max(0.0, start_lookahead_s):
+                pump_run_command = True
+                pump_command_reason = 'prestart_or_print'
+            elif time_to_print_stop_s is not None and time_to_print_stop_s <= max(0.0, stop_lookahead_s):
+                pump_run_command = False
+                pump_command_reason = 'prestop'
+            else:
+                pump_run_command = False
+                pump_command_reason = 'waiting_for_prestart'
+
         out = {
             'available': self.status['available'],
             'extruder': self.extruder_name,
@@ -193,6 +272,11 @@ class DrukMixPlannerProbe:
             'queue_end_print_time': queue_end,
             'queue_tail_s': tail,
             'data_source': 'enqueue_mirror',
+            'print_window_active': bool(print_window_active),
+            'time_to_print_start_s': time_to_print_start_s,
+            'time_to_print_stop_s': time_to_print_stop_s,
+            'pump_run_command': bool(pump_run_command),
+            'pump_command_reason': pump_command_reason,
         }
 
         if est is not None:
@@ -207,13 +291,17 @@ class DrukMixPlannerProbe:
             first = self._moves[0]['start_time'] if self._moves else None
             last = self._moves[-1]['end_time'] if self._moves else None
             logging.info(
-                "drukmix_planner_probe status: est=%s moves=%d first=%s last=%s queue_end=%s tail=%s v_now=%s v_250=%s v_1000=%s v_4000=%s",
+                "drukmix_planner_probe status: est=%s moves=%d first=%s last=%s queue_end=%s tail=%s t_start=%s t_stop=%s pump_run=%s reason=%s v_now=%s v_250=%s v_1000=%s v_4000=%s",
                 est,
                 len(self._moves),
                 first,
                 last,
                 queue_end,
                 tail,
+                time_to_print_start_s,
+                time_to_print_stop_s,
+                int(pump_run_command),
+                pump_command_reason,
                 out.get('planned_v_now'),
                 out.get('planned_v_250ms'),
                 out.get('planned_v_1000ms'),

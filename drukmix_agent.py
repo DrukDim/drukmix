@@ -36,7 +36,14 @@ PLANNER_HORIZONS = (
     ("planned_v_15000ms", 15.000),
 )
 
-PLANNER_FIELD_NAMES = ["queue_tail_s"] + [name for name, _ in PLANNER_HORIZONS]
+PLANNER_FIELD_NAMES = [
+    "queue_tail_s",
+    "print_window_active",
+    "time_to_print_start_s",
+    "time_to_print_stop_s",
+    "pump_run_command",
+    "pump_command_reason",
+] + [name for name, _ in PLANNER_HORIZONS]
 
 
 def clamp(x: float, lo: float, hi: float) -> float:
@@ -95,6 +102,11 @@ class Cfg:
 class KlipperState:
     extrude_factor: float = 1.0
     planner_queue_tail_s: float = 0.0
+    planner_print_window_active: bool = False
+    planner_time_to_print_start_s: Optional[float] = None
+    planner_time_to_print_stop_s: Optional[float] = None
+    planner_pump_run_command: bool = False
+    planner_pump_command_reason: str = "idle"
     planner_last_update_t: float = 0.0
     planner_values: Dict[str, Optional[float]] = dataclasses.field(
         default_factory=lambda: {name: None for name, _ in PLANNER_HORIZONS}
@@ -251,6 +263,18 @@ def apply_status(ks: KlipperState, st: Dict[str, Any], now: float) -> None:
         pp = st["drukmix_planner_probe"]
         if "queue_tail_s" in pp:
             ks.planner_queue_tail_s = _safe_float(pp.get("queue_tail_s"), 0.0)
+        if "print_window_active" in pp:
+            ks.planner_print_window_active = bool(pp.get("print_window_active"))
+        if "time_to_print_start_s" in pp:
+            v = pp.get("time_to_print_start_s")
+            ks.planner_time_to_print_start_s = None if v is None else _safe_float(v, 0.0)
+        if "time_to_print_stop_s" in pp:
+            v = pp.get("time_to_print_stop_s")
+            ks.planner_time_to_print_stop_s = None if v is None else _safe_float(v, 0.0)
+        if "pump_run_command" in pp:
+            ks.planner_pump_run_command = bool(pp.get("pump_run_command"))
+        if "pump_command_reason" in pp:
+            ks.planner_pump_command_reason = str(pp.get("pump_command_reason") or "idle")
         for name, _ in PLANNER_HORIZONS:
             if name in pp:
                 ks.planner_values[name] = None if pp.get(name) is None else _safe_float(pp.get(name), 0.0)
@@ -841,7 +865,8 @@ async def run_agent(cfg_path: str):
                     backend.set_auto_target_pct(target_pct, rev)
                     last_target_pct = target_pct
 
-                should_run_now = planner_valid and pump_should_run(control_velocity, target_pct)
+                semantic_should_run_now = planner_valid and ks.planner_pump_run_command and ks.planner_print_window_active
+                should_run_now = semantic_should_run_now
 
                 if st.link_ok or (not should_run_now):
                     pump_offline_since = None
@@ -864,7 +889,7 @@ async def run_agent(cfg_path: str):
                     and (offline_by_age or offline_by_time)
                 ):
                     log.warning(
-                        "DBG pause reason=pump_offline planner_valid=%d tail_s=%.3f link_ok=%d age_ms=%s mode=%s ctrl_vel=%.3f target_pct=%.2f should_run=%d off_age=%d off_time=%d",
+                        "DBG pause reason=pump_offline planner_valid=%d tail_s=%.3f link_ok=%d age_ms=%s mode=%s ctrl_vel=%.3f target_pct=%.2f should_run=%d off_age=%d off_time=%d t_start=%s t_stop=%s cmd_reason=%s",
                         int(planner_valid),
                         ks.planner_queue_tail_s,
                         int(st.link_ok),
@@ -875,6 +900,9 @@ async def run_agent(cfg_path: str):
                         int(should_run_now),
                         int(offline_by_age),
                         int(offline_by_time),
+                        ks.planner_time_to_print_start_s,
+                        ks.planner_time_to_print_stop_s,
+                        ks.planner_pump_command_reason,
                     )
                     try:
                         await mr.pause_print()
@@ -901,7 +929,7 @@ async def run_agent(cfg_path: str):
                 if now - last_log_t >= max(0.2, cfg.log_period_s):
                     last_log_t = now
                     log.info(
-                        "drukmix: backend=%s mode=%s planner_valid=%d tail_s=%.3f ctrl_vel=%.3f ef=%.3f target_pct=%.2f rev=%d link_ok=%d fault=%d code=%d age_ms=%s target_mlpm=%d hw_raw=%d pump_flags=%d ack_seq=%d applied=%d start_lookahead_s=%.3f run_lookahead_s=%.3f stop_lookahead_s=%.3f stale_timeout_s=%.3f",
+                        "drukmix: backend=%s mode=%s planner_valid=%d tail_s=%.3f ctrl_vel=%.3f ef=%.3f target_pct=%.2f rev=%d link_ok=%d fault=%d code=%d age_ms=%s target_mlpm=%d hw_raw=%d pump_flags=%d ack_seq=%d applied=%d start_lookahead_s=%.3f run_lookahead_s=%.3f stop_lookahead_s=%.3f stale_timeout_s=%.3f print_window=%d t_start=%s t_stop=%s pump_cmd=%d cmd_reason=%s",
                         st.backend,
                         st.control_mode,
                         int(planner_valid),
@@ -923,6 +951,11 @@ async def run_agent(cfg_path: str):
                         cfg.pump_run_lookahead_s,
                         cfg.pump_stop_lookahead_s,
                         cfg.planner_stale_timeout_s,
+                        int(ks.planner_print_window_active),
+                        ks.planner_time_to_print_start_s,
+                        ks.planner_time_to_print_stop_s,
+                        int(ks.planner_pump_run_command),
+                        ks.planner_pump_command_reason,
                     )
 
                 await asyncio.sleep(1.0 / max(cfg.update_hz, 0.5))
