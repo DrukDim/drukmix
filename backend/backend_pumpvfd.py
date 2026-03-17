@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from backend.pump_backend_base import PumpBackend, PumpStatus
 from backend.vfd_faults import get_vfd_fault_info
 
@@ -18,6 +20,7 @@ class PumpVfdBackend(PumpBackend):
         self._last_target_pct = 0.0
         self._last_rev = False
         self._stopped = True
+        self.debug_log = False
 
     def open(self) -> None:
         self.transport.open()
@@ -30,22 +33,55 @@ class PumpVfdBackend(PumpBackend):
         pct = clamp(float(pct), 0.0, 100.0)
         rev = bool(rev)
 
+        prev_pct = self._last_target_pct
+        prev_rev = self._last_rev
+        prev_stopped = self._stopped
+
         self._last_target_pct = pct
         self._last_rev = rev
+
+        if self.debug_log:
+            logging.info(
+                "drukmix backend apply: cmd=set_auto_target_pct pct=%.3f rev=%d prev_pct=%.3f prev_rev=%d prev_stopped=%d",
+                pct,
+                int(rev),
+                prev_pct,
+                int(prev_rev),
+                int(prev_stopped),
+            )
 
         # zero-flow: не спамимо STOP кожен цикл
         if pct <= 0.0:
             if not self._stopped:
+                if self.debug_log:
+                    logging.info("drukmix backend apply: action=vfd_stop reason=zero_pct")
                 self.transport.vfd_stop()
                 self._stopped = True
+            else:
+                if self.debug_log:
+                    logging.info("drukmix backend apply: action=skip_stop reason=already_stopped")
             return
 
+        if self.debug_log:
+            logging.info(
+                "drukmix backend apply: action=vfd_set_run pct=%.3f rev=%d",
+                pct,
+                int(rev),
+            )
         self.transport.vfd_set_run(pct=pct, rev=rev)
         self._stopped = False
 
     def stop(self) -> None:
         self._last_target_pct = 0.0
+        if self.debug_log:
+            logging.info(
+                "drukmix backend stop: called last_rev=%d already_stopped=%d",
+                int(self._last_rev),
+                int(self._stopped),
+            )
         if not self._stopped:
+            if self.debug_log:
+                logging.info("drukmix backend stop: action=vfd_stop")
             self.transport.vfd_stop()
             self._stopped = True
 
@@ -87,6 +123,23 @@ class PumpVfdBackend(PumpBackend):
         else:
             self._err16_active = False
             self._auto_reset_err16_done = False
+
+        if self.debug_log:
+            logging.info(
+                "drukmix backend poll: link_ok=%s running=%s rev_active=%s faulted=%s code=%s target_pct=%.3f target_mlpm=%s hw_raw=%s pump_flags=%s ack_seq=%s applied=%s age_ms=%s",
+                raw.get("link_ok"),
+                raw.get("running"),
+                raw.get("rev_active"),
+                raw.get("faulted"),
+                fault_code,
+                self._last_target_pct,
+                raw.get("target_milli_lpm"),
+                raw.get("hw_setpoint_raw"),
+                raw.get("pump_flags"),
+                raw.get("last_ack_seq"),
+                raw.get("applied_code"),
+                raw.get("age_ms"),
+            )
 
         info = get_vfd_fault_info(fault_code) if fault_code > 0 else None
 

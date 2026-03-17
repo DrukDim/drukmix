@@ -78,6 +78,7 @@ class Cfg:
     pause_on_manual_mode: bool
     ui_notify: bool
     planner_debug_log: bool
+    backend_debug_log: bool
 
     bridge_offline_timeout_s: float
     pump_offline_timeout_s: float
@@ -174,6 +175,7 @@ def load_config(path: str) -> Cfg:
         pause_on_manual_mode=get_bool("pause_on_manual_mode", True),
         ui_notify=get_bool("ui_notify", True),
         planner_debug_log=get_bool("planner_debug_log", False),
+        backend_debug_log=get_bool("backend_debug_log", False),
 
         bridge_offline_timeout_s=_get_float(s, "bridge_offline_timeout_s", 1.0),
         pump_offline_timeout_s=_get_float(s, "pump_offline_timeout_s", 1.2),
