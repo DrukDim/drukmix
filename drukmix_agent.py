@@ -533,6 +533,11 @@ async def run_agent(cfg_path: str):
                 backend = PumpTplBackend(transport)
             else:
                 backend = PumpVfdBackend(transport)
+
+            if hasattr(backend, "debug_log"):
+                backend.debug_log = bool(cfg.backend_debug_log)
+                log.info("drukmix: backend_debug_log=%s backend=%s", int(bool(cfg.backend_debug_log)), cfg.backend)
+
             backend.open()
 
             core = DrukMixCore(CoreSettings(
