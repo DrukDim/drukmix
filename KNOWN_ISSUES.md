@@ -68,10 +68,15 @@ Status: active constraint
 
 Recent fixes were required to debounce pump offline pause behavior and avoid repeated or misleading pause-trigger behavior.
 
+Confirmed current findings:
+- repository code had drifted from a printer-side experimental fix, so planner lookahead was still using point-sampled horizon selection instead of window-max selection inside the requested lookahead window;
+- repository code used `bridge_offline_timeout_s` for the elapsed-offline pause path where `pump_offline_timeout_s` was expected for pump-offline decision timing.
+
 Implication:
 
 - changes to offline detection, pause triggering, debounce, or fault episodes must be treated as high-risk;
-- logs and runtime behavior must be checked together, not in isolation.
+- logs and runtime behavior must be checked together, not in isolation;
+- repository and deployed runtime must be re-synchronized before further pump-offline tuning conclusions are accepted.
 
 Related areas:
 
@@ -240,6 +245,9 @@ The system now needs a canonical multi-phase lookahead policy:
 - longer cold-start lookahead,
 - shorter running lookahead,
 - longer stop lookahead.
+
+Additional current note:
+- point-sampled lookahead selection was confirmed insufficient on the live machine and repository runtime must use window-max selection across the active lookahead window before policy conclusions are treated as stable.
 
 ### 13. Normalize README so it stays the single source of truth for project overview, current deployment model, and active constraints
 

@@ -268,6 +268,28 @@ def planner_velocity_at(ks: KlipperState, lookahead_s: float) -> tuple[float, fl
     return (0.0 if v is None else max(0.0, float(v)), float(last_h))
 
 
+def planner_velocity_window_max(ks: KlipperState, lookahead_s: float) -> tuple[float, float]:
+    lookahead_s = max(0.0, float(lookahead_s))
+    best_v = 0.0
+    best_h = 0.0
+
+    for name, horizon_s in PLANNER_HORIZONS:
+        if horizon_s > lookahead_s:
+            break
+        v = ks.planner_values.get(name)
+        v = 0.0 if v is None else max(0.0, float(v))
+        if v >= best_v:
+            best_v = v
+            best_h = float(horizon_s)
+
+    if best_h == 0.0:
+        v0 = ks.planner_values.get("planned_v_now")
+        best_v = 0.0 if v0 is None else max(0.0, float(v0))
+        best_h = 0.0
+
+    return best_v, best_h
+
+
 def planner_is_fresh(cfg: Cfg, ks: KlipperState, now: float) -> bool:
     if ks.planner_last_update_t <= 0.0:
         return False
@@ -275,21 +297,23 @@ def planner_is_fresh(cfg: Cfg, ks: KlipperState, now: float) -> bool:
 
 
 def select_control_velocity_meta(cfg: Cfg, ks: KlipperState, pump_running_hint: bool) -> tuple[float, float, float]:
+    queue_tail = max(0.0, float(ks.planner_queue_tail_s))
+
     if not pump_running_hint:
         requested_lookahead_s = cfg.pump_start_lookahead_s
-        effective_lookahead_s = min(max(0.0, float(requested_lookahead_s)), max(0.0, float(ks.planner_queue_tail_s)))
-        vel, selected_horizon_s = planner_velocity_at(ks, effective_lookahead_s)
+        effective_lookahead_s = min(max(0.0, float(requested_lookahead_s)), queue_tail)
+        vel, selected_horizon_s = planner_velocity_window_max(ks, effective_lookahead_s)
         return vel, requested_lookahead_s, selected_horizon_s
 
     stop_requested_lookahead_s = cfg.pump_stop_lookahead_s
-    stop_effective_lookahead_s = min(max(0.0, float(stop_requested_lookahead_s)), max(0.0, float(ks.planner_queue_tail_s)))
-    stop_vel, stop_selected_horizon_s = planner_velocity_at(ks, stop_effective_lookahead_s)
+    stop_effective_lookahead_s = min(max(0.0, float(stop_requested_lookahead_s)), queue_tail)
+    stop_vel, stop_selected_horizon_s = planner_velocity_window_max(ks, stop_effective_lookahead_s)
     if stop_vel <= 0.0:
         return 0.0, stop_requested_lookahead_s, stop_selected_horizon_s
 
     run_requested_lookahead_s = cfg.pump_run_lookahead_s
-    run_effective_lookahead_s = min(max(0.0, float(run_requested_lookahead_s)), max(0.0, float(ks.planner_queue_tail_s)))
-    vel, selected_horizon_s = planner_velocity_at(ks, run_effective_lookahead_s)
+    run_effective_lookahead_s = min(max(0.0, float(run_requested_lookahead_s)), queue_tail)
+    vel, selected_horizon_s = planner_velocity_window_max(ks, run_effective_lookahead_s)
     return vel, run_requested_lookahead_s, selected_horizon_s
 
 
@@ -831,7 +855,7 @@ async def run_agent(cfg_path: str):
 
                 offline_by_time = False
                 if pump_offline_since is not None:
-                    offline_by_time = (now - pump_offline_since) >= max(0.0, cfg.bridge_offline_timeout_s)
+                    offline_by_time = (now - pump_offline_since) >= max(0.0, cfg.pump_offline_timeout_s)
 
                 if (
                     cfg.pause_on_pump_offline
