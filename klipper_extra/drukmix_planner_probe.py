@@ -46,6 +46,8 @@ class DrukMixPlannerProbe:
         self.debug_every_n_moves = config.getint('debug_every_n_moves', 200)
         self._debug_move_counter = 0
         self.print_velocity_epsilon = config.getfloat('print_velocity_epsilon', 0.001, minval=0.0)
+        self.pump_start_lookahead_s = config.getfloat('pump_start_lookahead_s', 3.0, minval=0.0)
+        self.pump_stop_lookahead_s = config.getfloat('pump_stop_lookahead_s', 3.0, minval=0.0)
         self.status = {
             'available': False,
             'extruder': self.extruder_name,
@@ -56,8 +58,6 @@ class DrukMixPlannerProbe:
             'print_window_active': False,
             'time_to_print_start_s': None,
             'time_to_print_stop_s': None,
-            'pump_run_command': False,
-            'pump_command_reason': 'idle',
         }
         self.printer.register_event_handler("klippy:connect", self._handle_connect)
 
@@ -226,19 +226,6 @@ class DrukMixPlannerProbe:
         if est is not None and queue_end is not None:
             tail = max(0.0, float(queue_end) - float(est))
 
-        configfile = self.printer.lookup_object('configfile', None)
-        start_lookahead_s = 0.0
-        stop_lookahead_s = 0.0
-        if configfile is not None:
-            try:
-                start_lookahead_s = float(configfile.status_raw_config['drukmix'].get('pump_start_lookahead_s', 0.0))
-            except Exception:
-                start_lookahead_s = 0.0
-            try:
-                stop_lookahead_s = float(configfile.status_raw_config['drukmix'].get('pump_stop_lookahead_s', 0.0))
-            except Exception:
-                stop_lookahead_s = 0.0
-
         first_print = self._first_print_move_after(est)
         last_print = self._last_print_move_after(est)
 
@@ -252,19 +239,6 @@ class DrukMixPlannerProbe:
 
         print_window_active = last_print is not None
 
-        pump_run_command = False
-        pump_command_reason = 'idle'
-        if print_window_active:
-            if time_to_print_stop_s is not None and time_to_print_stop_s <= max(0.0, stop_lookahead_s):
-                pump_run_command = False
-                pump_command_reason = 'prestop'
-            elif time_to_print_start_s is not None and time_to_print_start_s <= max(0.0, start_lookahead_s):
-                pump_run_command = True
-                pump_command_reason = 'prestart_or_print'
-            else:
-                pump_run_command = False
-                pump_command_reason = 'waiting_for_prestart'
-
         out = {
             'available': self.status['available'],
             'extruder': self.extruder_name,
@@ -275,8 +249,6 @@ class DrukMixPlannerProbe:
             'print_window_active': bool(print_window_active),
             'time_to_print_start_s': time_to_print_start_s,
             'time_to_print_stop_s': time_to_print_stop_s,
-            'pump_run_command': bool(pump_run_command),
-            'pump_command_reason': pump_command_reason,
         }
 
         if est is not None:
@@ -291,17 +263,17 @@ class DrukMixPlannerProbe:
             first = self._moves[0]['start_time'] if self._moves else None
             last = self._moves[-1]['end_time'] if self._moves else None
             logging.info(
-                "drukmix_planner_probe status: est=%s moves=%d first=%s last=%s queue_end=%s tail=%s t_start=%s t_stop=%s pump_run=%s reason=%s v_now=%s v_250=%s v_1000=%s v_4000=%s",
+                "drukmix_planner_probe status: est=%s moves=%d first=%s last=%s queue_end=%s tail=%s start_lookahead=%.3f stop_lookahead=%.3f t_start=%s t_stop=%s v_now=%s v_250=%s v_1000=%s v_4000=%s",
                 est,
                 len(self._moves),
                 first,
                 last,
                 queue_end,
                 tail,
+                self.pump_start_lookahead_s,
+                self.pump_stop_lookahead_s,
                 time_to_print_start_s,
                 time_to_print_stop_s,
-                int(pump_run_command),
-                pump_command_reason,
                 out.get('planned_v_now'),
                 out.get('planned_v_250ms'),
                 out.get('planned_v_1000ms'),
