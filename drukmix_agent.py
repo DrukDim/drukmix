@@ -77,6 +77,7 @@ class Cfg:
     pause_on_pump_offline: bool
     pause_on_manual_mode: bool
     ui_notify: bool
+    planner_debug_log: bool
 
     bridge_offline_timeout_s: float
     pump_offline_timeout_s: float
@@ -172,6 +173,7 @@ def load_config(path: str) -> Cfg:
         pause_on_pump_offline=get_bool("pause_on_pump_offline", True),
         pause_on_manual_mode=get_bool("pause_on_manual_mode", True),
         ui_notify=get_bool("ui_notify", True),
+        planner_debug_log=get_bool("planner_debug_log", False),
 
         bridge_offline_timeout_s=_get_float(s, "bridge_offline_timeout_s", 1.0),
         pump_offline_timeout_s=_get_float(s, "pump_offline_timeout_s", 1.2),
@@ -616,6 +618,16 @@ async def run_agent(cfg_path: str):
                         if params and isinstance(params[0], dict):
                             st0 = params[0]
                             apply_status(ks, st0, now)
+                            if cfg.planner_debug_log and "drukmix_planner_probe" in st0:
+                                pp = st0["drukmix_planner_probe"]
+                                logging.info(
+                                    "drukmix agent probe update: queue_tail_s=%s v_now=%s v_250=%s v_1000=%s v_4000=%s",
+                                    pp.get("queue_tail_s"),
+                                    pp.get("planned_v_now"),
+                                    pp.get("planned_v_250ms"),
+                                    pp.get("planned_v_1000ms"),
+                                    pp.get("planned_v_4000ms"),
+                                )
                         continue
 
                     rc = parse_remote_call(msg)

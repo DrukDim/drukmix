@@ -196,6 +196,25 @@ Related areas:
 - planner lookahead policy
 - host orchestration semantics
 
+
+### 9a. Planner probe may load successfully while runtime planned queue/velocity stays zero during active print
+
+Status: active confirmed defect
+
+`drukmix_planner_probe` is confirmed to load, hook, and appear in the include chain, but runtime automatic pump control can still see `queue_tail_s=0.000` and zero planned velocities during an active print.
+
+Implication:
+
+- the current fault boundary is likely inside the planner signal path rather than simple config loading;
+- investigation must check the full path: extruder hook -> mirrored move queue -> probe status -> Moonraker status delivery -> agent status ingest.
+
+Related areas:
+
+- `klipper_extra/drukmix_planner_probe.py`
+- `drukmix_agent.py`
+- Moonraker status transport
+- planner timebase / queue mirroring
+
 ## Active checklist
 
 These items are intentionally preserved from the prior canonical checklist.

@@ -42,6 +42,9 @@ class DrukMixPlannerProbe:
         self.extruder_obj = None
         self._orig_process_move = None
         self._moves = deque()
+        self.debug_enabled = config.getboolean('debug_enabled', False)
+        self.debug_every_n_moves = config.getint('debug_every_n_moves', 200)
+        self._debug_move_counter = 0
         self.status = {
             'available': False,
             'extruder': self.extruder_name,
@@ -101,6 +104,22 @@ class DrukMixPlannerProbe:
                     axis_r > 0.0 and (move.axes_d[0] or move.axes_d[1])
                 ),
             })
+            probe._debug_move_counter += 1
+            if probe.debug_enabled:
+                if probe._debug_move_counter <= 5 or (probe._debug_move_counter % max(1, probe.debug_every_n_moves)) == 0:
+                    logging.info(
+                        "drukmix_planner_probe move: n=%d pt=%.6f ea=%s axis_r=%.6f start_v=%.6f cruise_v=%.6f accel_t=%.6f cruise_t=%.6f decel_t=%.6f end=%.6f",
+                        probe._debug_move_counter,
+                        float(print_time),
+                        ea_index,
+                        float(axis_r),
+                        float(start_v),
+                        float(cruise_v),
+                        float(move.accel_t),
+                        float(move.cruise_t),
+                        float(move.decel_t),
+                        float(end_time),
+                    )
             return orig(print_time, move, ea_index)
 
         self.extruder_obj.process_move = wrapped_process_move
@@ -184,6 +203,22 @@ class DrukMixPlannerProbe:
                 out[key] = None
 
         self.status.update(out)
+        if self.debug_enabled:
+            first = self._moves[0]['start_time'] if self._moves else None
+            last = self._moves[-1]['end_time'] if self._moves else None
+            logging.info(
+                "drukmix_planner_probe status: est=%s moves=%d first=%s last=%s queue_end=%s tail=%s v_now=%s v_250=%s v_1000=%s v_4000=%s",
+                est,
+                len(self._moves),
+                first,
+                last,
+                queue_end,
+                tail,
+                out.get('planned_v_now'),
+                out.get('planned_v_250ms'),
+                out.get('planned_v_1000ms'),
+                out.get('planned_v_4000ms'),
+            )
         return dict(self.status)
 
 
