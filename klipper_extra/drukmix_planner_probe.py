@@ -255,12 +255,12 @@ class DrukMixPlannerProbe:
         pump_run_command = False
         pump_command_reason = 'idle'
         if print_window_active:
-            if time_to_print_start_s is not None and time_to_print_start_s <= max(0.0, start_lookahead_s):
-                pump_run_command = True
-                pump_command_reason = 'prestart_or_print'
-            elif time_to_print_stop_s is not None and time_to_print_stop_s <= max(0.0, stop_lookahead_s):
+            if time_to_print_stop_s is not None and time_to_print_stop_s <= max(0.0, stop_lookahead_s):
                 pump_run_command = False
                 pump_command_reason = 'prestop'
+            elif time_to_print_start_s is not None and time_to_print_start_s <= max(0.0, start_lookahead_s):
+                pump_run_command = True
+                pump_command_reason = 'prestart_or_print'
             else:
                 pump_run_command = False
                 pump_command_reason = 'waiting_for_prestart'
