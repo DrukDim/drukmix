@@ -220,6 +220,24 @@ restart_service() {
   sudo systemctl restart drukmix.service
 }
 
+restart_klipper() {
+  curl -s -X POST localhost:7125/printer/gcode/script \
+    -H 'Content-Type: application/json' \
+    -d '{"script":"RESTART"}' >/dev/null
+}
+
+wait_klipper_ready() {
+  local n=0
+  while [[ $n -lt 60 ]]; do
+    if curl -s localhost:7125/server/info | grep -q '"klippy_state":"ready"'; then
+      return 0
+    fi
+    sleep 1
+    n=$((n+1))
+  done
+  return 1
+}
+
 wait_for_bridge_alias() {
   local n=0
   while [[ $n -lt 20 ]]; do
@@ -303,6 +321,12 @@ do_install() {
   fi
   install_klipper_extra_if_present
   restart_service
+  restart_klipper
+  if wait_klipper_ready; then
+    echo "klipper ready after RESTART"
+  else
+    echo "WARNING: klipper did not report ready after RESTART"
+  fi
   do_status
 }
 
@@ -321,6 +345,12 @@ do_update() {
   reload_udev_rules
   install_klipper_extra_if_present
   restart_service
+  restart_klipper
+  if wait_klipper_ready; then
+    echo "klipper ready after RESTART"
+  else
+    echo "WARNING: klipper did not report ready after RESTART"
+  fi
   do_status
 }
 
@@ -351,6 +381,12 @@ do_purge() {
 
 do_restart() {
   restart_service
+  restart_klipper
+  if wait_klipper_ready; then
+    echo "klipper ready after RESTART"
+  else
+    echo "WARNING: klipper did not report ready after RESTART"
+  fi
   do_status
 }
 
@@ -386,6 +422,13 @@ do_status() {
   echo
 
   echo
+  echo "== drukmix planner probe =="
+  curl -s -X POST localhost:7125/printer/objects/query \
+    -H 'Content-Type: application/json' \
+    -d '{"objects":{"drukmix_planner_probe":["queue_tail_s","print_window_active","time_to_print_start_s","time_to_print_stop_s","control_velocity_mms"]}}' || true
+  echo
+
+  echo
   echo "== config preview =="
   sed -n '1,220p' "$CFG_DST" || true
 }
@@ -416,6 +459,12 @@ do_doctor() {
   echo
   echo "Moonraker:"
   curl -s localhost:7125/server/info || true
+  echo
+
+  echo "drukmix planner probe:"
+  curl -s -X POST localhost:7125/printer/objects/query \
+    -H 'Content-Type: application/json' \
+    -d '{"objects":{"drukmix_planner_probe":["queue_tail_s","print_window_active","time_to_print_start_s","time_to_print_stop_s","control_velocity_mms"]}}' || true
   echo
 }
 
