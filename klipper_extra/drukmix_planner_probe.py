@@ -48,6 +48,10 @@ class DrukMixPlannerProbe:
             'time_to_print_start_s': None,
             'time_to_print_stop_s': None,
             'control_velocity_mms': 0.0,
+            'first_print_start_time': None,
+            'est_print_time': None,
+            'planner_horizon_to_first_print': None,
+            'moves_in_queue': 0,
         }
 
         self.printer.register_event_handler("klippy:connect", self._handle_connect)
@@ -215,6 +219,17 @@ class DrukMixPlannerProbe:
         first_print = self._first_print_move_after(est)
         last_print = self._last_print_move_after(est)
 
+        first_print_start_time = None
+        if first_print is not None:
+            first_print_start_time = float(first_print['start_time'])
+
+        planner_horizon_to_first_print = None
+        if est is not None and first_print_start_time is not None:
+            planner_horizon_to_first_print = max(
+                0.0,
+                float(first_print_start_time) - float(est),
+            )
+
         print_window_active = last_print is not None
 
         time_to_print_start_s = None
@@ -253,6 +268,10 @@ class DrukMixPlannerProbe:
             'time_to_print_start_s': time_to_print_start_s,
             'time_to_print_stop_s': time_to_print_stop_s,
             'control_velocity_mms': control_velocity_mms,
+            'first_print_start_time': first_print_start_time,
+            'est_print_time': est,
+            'planner_horizon_to_first_print': planner_horizon_to_first_print,
+            'moves_in_queue': len(self._moves),
         }
 
         self.status.update(out)
@@ -261,12 +280,14 @@ class DrukMixPlannerProbe:
             first_t = self._moves[0]['start_time'] if self._moves else None
             last_t = self._moves[-1]['end_time'] if self._moves else None
             logging.info(
-                "drukmix_planner_probe status: est=%s moves=%d first=%s last=%s tail=%s t_start=%s t_stop=%s control_velocity=%s",
+                "drukmix_planner_probe status: est=%s moves=%d first=%s last=%s tail=%s first_print_start_time=%s horizon_to_first=%s t_start=%s t_stop=%s control_velocity=%s",
                 est,
                 len(self._moves),
                 first_t,
                 last_t,
                 queue_tail_s,
+                first_print_start_time,
+                planner_horizon_to_first_print,
                 time_to_print_start_s,
                 time_to_print_stop_s,
                 control_velocity_mms,
