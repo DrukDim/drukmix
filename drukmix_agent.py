@@ -638,9 +638,26 @@ async def run_agent(cfg_path: str):
             suppress_fault_until = 0.0
             pump_offline_since = None
             last_target_pct = 0.0
+            last_probe_poll_t = 0.0
 
             while True:
                 now = time.monotonic()
+
+                if now - last_probe_poll_t >= 0.25:
+                    last_probe_poll_t = now
+                    try:
+                        sub = await mr.call("printer.objects.query", {
+                            "objects": {
+                                "gcode_move": ["extrude_factor"],
+                                "drukmix_planner_probe": PLANNER_FIELD_NAMES,
+                            }
+                        })
+                        if isinstance(sub, dict):
+                            status = sub.get("status", {})
+                            if isinstance(status, dict):
+                                apply_status(ks, status, now)
+                    except Exception as e:
+                        log.warning(f"drukmix: planner poll failed: {e}")
 
                 if fs.active and fs.until_t > 0.0 and now >= fs.until_t:
                     fs.active = False
