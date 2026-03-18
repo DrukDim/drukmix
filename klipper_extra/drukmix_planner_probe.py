@@ -226,6 +226,14 @@ class DrukMixPlannerProbe:
                 v = self._velocity_in_move(active_move, est)
                 if v is not None:
                     control_velocity_mms = max(0.0, float(v))
+            elif (
+                first_print is not None
+                and time_to_print_start_s is not None
+                and time_to_print_start_s <= self.pump_start_lookahead_s
+            ):
+                v = self._velocity_in_move(first_print, first_print['start_time'])
+                if v is not None:
+                    control_velocity_mms = max(0.0, float(v))
 
         out = {
             'available': self.status['available'],
