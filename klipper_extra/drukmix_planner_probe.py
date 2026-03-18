@@ -180,8 +180,6 @@ class DrukMixPlannerProbe:
             return False
         if m.get('axis_r', 0.0) <= 0.0:
             return False
-        if max(abs(m['start_v']), abs(m['cruise_v'])) <= self.print_velocity_epsilon:
-            return False
         return True
 
     def _first_print_move_after(self, est):
