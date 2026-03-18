@@ -777,7 +777,7 @@ async def run_agent(cfg_path: str):
                     semantic_should_run_now, semantic_reason = planner_semantic_should_run(
                         cfg,
                         ks,
-                        bool(st.running) or last_target_pct > 0.5,
+                        bool(st.running),
                     )
 
                 auto_allowed, mode_reason = mode_allows_auto(st.control_mode)
