@@ -113,12 +113,27 @@ Canonical direction:
 - printer lifecycle fields such as `print_stats.state`, `pause_resume`, and `idle_timeout` are not intended to remain automatic pump-control gates;
 - backend fault/manual/offline handling remains independent.
 
+Current production planner contract is intentionally compact:
+- `queue_tail_s`
+- `print_window_active`
+- `time_to_print_start_s`
+- `time_to_print_stop_s`
+- `control_velocity_mms`
+
+Research-style multi-horizon planner fields such as `planned_v_now` ... `planned_v_15000ms` are not intended to remain in the production control path.
+
+Current deployment-stage expectation:
+- automatic operation is expected to run in backend mode `AUTO`;
+- backend mode `MANUAL` blocks automatic orchestration;
+- backend mode `UNKNOWN` also blocks automatic orchestration;
+- physical MANUAL/AUTO switching is planned future integration, not something to be approximated by weakening `UNKNOWN` handling.
+
 This direction has been validated sufficiently to justify architectural migration, but the final agent cleanup and the exact cold-start / run / stop lookahead policy are still being formalized.
 
 Relevant files:
 - `klipper_extra/drukmix_planner_probe.py`
 - `docs/research/planner_feedforward.md`
-- `config_examples/drukmix_research.cfg`
+- `config_examples/drukmix_planner.cfg`
 
 ## Workflow
 
