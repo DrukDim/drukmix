@@ -245,8 +245,8 @@ def apply_status(ks: KlipperState, st: Dict[str, Any], now: float) -> None:
             ks.extrude_factor = float(st["gcode_move"]["extrude_factor"])
         except Exception:
             ks.extrude_factor = 1.0
-    if "drukmix_planner_probe" in st and isinstance(st["drukmix_planner_probe"], dict):
-        pp = st["drukmix_planner_probe"]
+    if "drukmix_probe" in st and isinstance(st["drukmix_probe"], dict):
+        pp = st["drukmix_probe"]
         if "queue_tail_s" in pp:
             ks.planner_queue_tail_s = _safe_float(pp.get("queue_tail_s"), 0.0)
         if "print_window_active" in pp:
@@ -385,7 +385,7 @@ class MoonrakerClient:
         await self.call("printer.objects.subscribe", {
             "objects": {
                 "gcode_move": ["extrude_factor"],
-                "drukmix_planner_probe": PLANNER_FIELD_NAMES,
+                "drukmix_probe": PLANNER_FIELD_NAMES,
             }
         })
 
@@ -568,7 +568,7 @@ async def run_agent(cfg_path: str):
                 sub = await mr.call("printer.objects.query", {
                     "objects": {
                         "gcode_move": ["extrude_factor"],
-                        "drukmix_planner_probe": PLANNER_FIELD_NAMES,
+                        "drukmix_probe": PLANNER_FIELD_NAMES,
                     }
                 })
                 if isinstance(sub, dict):
@@ -598,7 +598,7 @@ async def run_agent(cfg_path: str):
                         sub = await mr.call("printer.objects.query", {
                             "objects": {
                                 "gcode_move": ["extrude_factor"],
-                                "drukmix_planner_probe": PLANNER_FIELD_NAMES,
+                                "drukmix_probe": PLANNER_FIELD_NAMES,
                             }
                         })
                         if isinstance(sub, dict):
