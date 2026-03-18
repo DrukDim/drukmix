@@ -221,6 +221,7 @@ ensure_planner_probe_section() {
   PRINTER_CFG="$PRINTER_CFG" python3 - <<'PY'
 from pathlib import Path
 import os
+import re
 
 p = Path(os.environ["PRINTER_CFG"])
 s = p.read_text()
@@ -235,12 +236,18 @@ debug_every_n_moves = 200
 print_velocity_epsilon = 0.001
 # --- drukmix planner probe (managed): end ---"""
 
+# Remove any old managed block variant.
 if begin in s and end in s:
-    a = s.index(begin)
-    b = s.index(end) + len(end)
-    s = s[:a].rstrip("\n") + "\n\n" + block + "\n"
-elif "[drukmix_planner_probe]" not in s:
-    s = s.rstrip("\n") + "\n\n" + block + "\n"
+  a = s.index(begin)
+  b = s.index(end) + len(end)
+  s = (s[:a] + s[b:]).rstrip("\n") + "\n"
+
+# Remove any unmanaged/legacy probe sections (including stale keys).
+section_re = re.compile(r"(?ms)^\[drukmix_planner_probe\]\s*\n.*?(?=^\[|\Z)")
+s = section_re.sub("", s).rstrip("\n")
+
+# Insert exactly one canonical managed section.
+s = s + "\n\n" + block + "\n"
 
 p.write_text(s)
 print(f"normalized {p} with managed [drukmix_planner_probe] section")
