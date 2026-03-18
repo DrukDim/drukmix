@@ -44,6 +44,7 @@ class DrukMixPlannerProbe:
             'time_to_print_start_s': None,
             'time_to_print_stop_s': None,
             'control_velocity_mms': 0.0,
+            'start_control_velocity_mms': 0.0,
         }
         self.printer.register_event_handler("klippy:connect", self._handle_connect)
 
@@ -227,6 +228,15 @@ class DrukMixPlannerProbe:
                 if v is not None:
                     control_velocity_mms = max(0.0, float(v))
 
+        start_control_velocity_mms = 0.0
+        if est is not None:
+            start_t = est + self.pump_start_lookahead_s
+            start_move = self._find_move_at(start_t)
+            if self._is_print_move(start_move):
+                v = self._velocity_in_move(start_move, start_t)
+                if v is not None:
+                    start_control_velocity_mms = max(0.0, float(v))
+
         out = {
             'available': self.status['available'],
             'extruder': self.extruder_name,
@@ -238,6 +248,7 @@ class DrukMixPlannerProbe:
             'time_to_print_start_s': time_to_print_start_s,
             'time_to_print_stop_s': time_to_print_stop_s,
             'control_velocity_mms': control_velocity_mms,
+            'start_control_velocity_mms': start_control_velocity_mms,
         }
 
         self.status.update(out)
@@ -245,7 +256,7 @@ class DrukMixPlannerProbe:
             first = self._moves[0]['start_time'] if self._moves else None
             last = self._moves[-1]['end_time'] if self._moves else None
             logging.info(
-                "drukmix_planner_probe status: est=%s moves=%d first=%s last=%s queue_end=%s tail=%s start_lookahead=%.3f stop_lookahead=%.3f t_start=%s t_stop=%s control_velocity=%s",
+                "drukmix_planner_probe status: est=%s moves=%d first=%s last=%s queue_end=%s tail=%s start_lookahead=%.3f stop_lookahead=%.3f t_start=%s t_stop=%s control_velocity=%s start_control_velocity=%s",
                 est,
                 len(self._moves),
                 first,
@@ -257,6 +268,7 @@ class DrukMixPlannerProbe:
                 time_to_print_start_s,
                 time_to_print_stop_s,
                 control_velocity_mms,
+                start_control_velocity_mms,
             )
         return dict(self.status)
 
