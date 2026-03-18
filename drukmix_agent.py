@@ -592,6 +592,7 @@ async def run_agent(cfg_path: str):
             pump_offline_since = None
             last_target_pct = 0.0
             last_probe_poll_t = 0.0
+            last_transition_key = None
 
             while True:
                 now = time.monotonic()
@@ -817,6 +818,33 @@ async def run_agent(cfg_path: str):
                 auto_allowed, mode_reason = mode_allows_auto(st.control_mode)
                 should_run_now = semantic_should_run_now and auto_allowed
 
+                transition_key = (
+                    int(planner_valid),
+                    int(ks.planner_print_window_active),
+                    semantic_reason,
+                    mode_reason,
+                    -1 if st.running is None else int(bool(st.running)),
+                    int(should_run_now),
+                    None if ks.planner_time_to_print_start_s is None else round(float(ks.planner_time_to_print_start_s), 3),
+                    None if ks.planner_time_to_print_stop_s is None else round(float(ks.planner_time_to_print_stop_s), 3),
+                )
+                if transition_key != last_transition_key:
+                    log.info(
+                        "drukmix transition: planner_valid=%d print_window=%d running=%s ctrl_vel=%.3f tail_s=%.3f t_start=%s t_stop=%s should_run=%d semantic=%s mode=%s last_target_pct=%.2f",
+                        int(planner_valid),
+                        int(ks.planner_print_window_active),
+                        st.running,
+                        control_velocity,
+                        ks.planner_queue_tail_s,
+                        ks.planner_time_to_print_start_s,
+                        ks.planner_time_to_print_stop_s,
+                        int(should_run_now),
+                        semantic_reason,
+                        mode_reason,
+                        last_target_pct,
+                    )
+                    last_transition_key = transition_key
+
                 if force_stop_due_to_fault:
                     target_pct = 0.0
                     rev = False
@@ -923,9 +951,10 @@ async def run_agent(cfg_path: str):
                 if now - last_log_t >= max(0.2, cfg.log_period_s):
                     last_log_t = now
                     log.info(
-                        "drukmix: backend=%s mode=%s planner_valid=%d tail_s=%.3f ctrl_vel=%.3f ef=%.3f target_pct=%.2f rev=%d link_ok=%d fault=%d code=%d age_ms=%s target_mlpm=%d hw_raw=%d pump_flags=%d ack_seq=%d applied=%d start_lookahead_s=%.3f run_lookahead_s=%.3f stop_lookahead_s=%.3f stale_timeout_s=%.3f print_window=%d t_start=%s t_stop=%s pump_cmd=%d cmd_reason=%s mode_reason=%s",
+                        "drukmix: backend=%s mode=%s running=%s planner_valid=%d tail_s=%.3f ctrl_vel=%.3f ef=%.3f target_pct=%.2f rev=%d link_ok=%d fault=%d code=%d age_ms=%s target_mlpm=%d hw_raw=%d pump_flags=%d ack_seq=%d applied=%d start_lookahead_s=%.3f run_lookahead_s=%.3f stop_lookahead_s=%.3f stale_timeout_s=%.3f print_window=%d t_start=%s t_stop=%s pump_cmd=%d cmd_reason=%s mode_reason=%s",
                         st.backend,
                         st.control_mode,
+                        st.running,
                         int(planner_valid),
                         ks.planner_queue_tail_s,
                         control_velocity,
