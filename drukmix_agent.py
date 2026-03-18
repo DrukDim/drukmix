@@ -240,8 +240,10 @@ def apply_status(ks: KlipperState, st: Dict[str, Any], now: float) -> None:
             ks.extrude_factor = float(st["gcode_move"]["extrude_factor"])
         except Exception:
             ks.extrude_factor = 1.0
+
     if "drukmix_planner_probe" in st and isinstance(st["drukmix_planner_probe"], dict):
         pp = st["drukmix_planner_probe"]
+
         if "queue_tail_s" in pp:
             ks.planner_queue_tail_s = _safe_float(pp.get("queue_tail_s"), 0.0)
         if "print_window_active" in pp:
@@ -253,7 +255,10 @@ def apply_status(ks: KlipperState, st: Dict[str, Any], now: float) -> None:
             v = pp.get("time_to_print_stop_s")
             ks.planner_time_to_print_stop_s = None if v is None else _safe_float(v, 0.0)
         if "control_velocity_mms" in pp:
-            ks.planner_control_velocity_mms = max(0.0, _safe_float(pp.get("control_velocity_mms"), 0.0))
+            ks.planner_control_velocity_mms = max(
+                0.0, _safe_float(pp.get("control_velocity_mms"), 0.0)
+            )
+
         ks.planner_last_update_t = now
 
 

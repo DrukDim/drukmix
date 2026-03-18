@@ -115,12 +115,8 @@ install_macros_if_missing() {
 }
 
 install_planner_if_missing() {
-  if [[ ! -f "$PLANNER_DST" ]]; then
-    cp "$PLANNER_TEMPLATE" "$PLANNER_DST"
-    echo "Installed default planner config: $PLANNER_DST"
-  else
-    echo "Keeping existing planner config: $PLANNER_DST"
-  fi
+  install -m 0644 "$PLANNER_TEMPLATE" "$PLANNER_DST"
+  echo "Installed planner config: $PLANNER_DST"
 }
 
 remove_file_if_present() {
