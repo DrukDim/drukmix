@@ -778,7 +778,7 @@ async def run_agent(cfg_path: str):
                 if hasattr(backend, "maybe_auto_reset_startup_fault"):
                     try:
                         did_reset = backend.maybe_auto_reset_startup_fault(
-                            printing=planner_valid and ks.planner_queue_tail_s > 0.0,
+                            printing=planner_valid and ks.planner_print_window_active,
                             running=st.running,
                         )
                         if did_reset:
@@ -790,7 +790,7 @@ async def run_agent(cfg_path: str):
 
                 if st.faulted and st.fault_code > 0 and time.monotonic() >= suppress_fault_until:
                     force_stop_due_to_fault = True
-                    if planner_valid and ks.planner_queue_tail_s > 0.0:
+                    if planner_valid and ks.planner_print_window_active:
                         backend.stop()
                         last_target_pct = 0.0
                         if st.pause_print:
@@ -877,9 +877,13 @@ async def run_agent(cfg_path: str):
                     target_pct = 0.0
                     rev = False
                     stop = True
+                elif not should_run_now:
+                    target_pct = 0.0
+                    rev = False
+                    stop = True
                 else:
                     out = core.compute(CoreInput(
-                        printing=ks.planner_queue_tail_s > 0.0,
+                        printing=ks.planner_print_window_active,
                         paused=False,
                         live_extruder_velocity=control_velocity,
                         extrude_factor=ks.extrude_factor,

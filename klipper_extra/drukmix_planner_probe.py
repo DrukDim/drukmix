@@ -301,21 +301,27 @@ class DrukMixPlannerProbe:
 
     def _pending_lookahead_print_window(self, est):
         if est is None or self.toolhead is None:
-            return None, None
+            return None, None, None
 
         lookahead = getattr(self.toolhead, 'lookahead', None)
         queue = getattr(lookahead, 'queue', None)
         if not queue:
-            return None, None
+            return None, None, None
 
+        committed_tail = float(self._moves[-1]['end_time']) if self._moves else float(est)
         try:
-            t_cursor = max(float(est), float(getattr(self.toolhead, 'print_time', est)))
+            t_cursor = max(
+                float(est),
+                float(getattr(self.toolhead, 'print_time', est)),
+                committed_tail,
+            )
         except Exception:
             t_cursor = float(est)
 
         gap_tolerance_s = max(0.0, float(self.print_gap_merge_s))
         window_start = None
         window_end = None
+        pending_tail = None
 
         for mv in queue:
             try:
@@ -328,6 +334,7 @@ class DrukMixPlannerProbe:
             m_start = t_cursor
             m_end = t_cursor + seg_t
             t_cursor = m_end
+            pending_tail = m_end
 
             axis_r = 0.0
             try:
@@ -341,19 +348,46 @@ class DrukMixPlannerProbe:
             if axis_r <= 0.0:
                 continue
 
+            try:
+                accel = float(mv.accel) * axis_r
+            except Exception:
+                accel = 0.0
+
+            try:
+                start_v = float(mv.start_v) * axis_r
+            except Exception:
+                start_v = 0.0
+
+            try:
+                cruise_v = float(mv.cruise_v) * axis_r
+            except Exception:
+                cruise_v = 0.0
+
+            synthesized = {
+                'start_time': float(m_start),
+                'end_time': float(m_end),
+                'accel_t': float(mv.accel_t),
+                'cruise_t': float(mv.cruise_t),
+                'decel_t': float(mv.decel_t),
+                'start_v': float(start_v),
+                'cruise_v': float(cruise_v),
+                'accel': float(accel),
+                'axis_r': float(axis_r),
+            }
+
             if window_start is None:
-                window_start = m_start
-                window_end = m_end
+                window_start = synthesized
+                window_end = synthesized
                 continue
 
-            if m_start > (window_end + gap_tolerance_s):
+            if m_start > (window_end['end_time'] + gap_tolerance_s):
                 break
-            if m_end > window_end:
-                window_end = m_end
+            if m_end > window_end['end_time']:
+                window_end = synthesized
 
         if window_start is None:
-            return None, None
-        return window_start, window_end
+            return None, None, pending_tail
+        return window_start, window_end, pending_tail
 
     def get_status(self, eventtime):
         est = self._estimated_print_time(eventtime)
@@ -379,18 +413,22 @@ class DrukMixPlannerProbe:
                 current_window_end['end_time']
             )
 
-        pending_start_s, pending_end_s = self._pending_lookahead_print_window(est)
-        if pending_start_s is not None:
-            pending_start = {
-                'start_time': float(pending_start_s),
-                'end_time': float(pending_end_s),
-            }
-            pending_end = pending_start
+        pending_start, pending_end, pending_tail = self._pending_lookahead_print_window(est)
+        if pending_tail is not None:
+            if queue_end is None:
+                queue_end = pending_tail
+            else:
+                queue_end = max(float(queue_end), float(pending_tail))
+
+        if pending_start is not None:
             if (
                 next_window_start is None
                 or pending_start['start_time'] < next_window_start['start_time']
             ):
                 next_window_start, next_window_end = pending_start, pending_end
+
+        if est is not None and queue_end is not None:
+            queue_tail_s = max(0.0, float(queue_end) - float(est))
 
         print_window_active = (current_window_start is not None) or (next_window_start is not None)
 
