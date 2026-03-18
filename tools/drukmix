@@ -319,10 +319,27 @@ EOF
 }
 
 reload_udev_rules() {
-  if command -v udevadm >/dev/null 2>&1; then
-    sudo udevadm control --reload-rules || true
-    sudo udevadm trigger || true
-    udevadm settle || true
+  if ! command -v udevadm >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local rc=0
+
+  sudo udevadm control --reload-rules >/dev/null 2>&1 || rc=$?
+  if [[ $rc -ne 0 ]]; then
+    echo "WARNING: udevadm control failed (rc=$rc), continuing"
+  fi
+
+  rc=0
+  sudo udevadm trigger >/dev/null 2>&1 || rc=$?
+  if [[ $rc -ne 0 ]]; then
+    echo "WARNING: udevadm trigger failed (rc=$rc), continuing"
+  fi
+
+  rc=0
+  udevadm settle >/dev/null 2>&1 || rc=$?
+  if [[ $rc -ne 0 ]]; then
+    echo "WARNING: udevadm settle failed (rc=$rc), continuing"
   fi
 }
 
