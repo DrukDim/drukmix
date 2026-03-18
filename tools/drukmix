@@ -233,6 +233,7 @@ extruder = extruder
 debug_enabled = False
 debug_every_n_moves = 200
 print_velocity_epsilon = 0.001
+host_buffer_target_s = 0.0
 # --- drukmix planner probe (managed): end ---"""
 
 if begin in s and end in s:

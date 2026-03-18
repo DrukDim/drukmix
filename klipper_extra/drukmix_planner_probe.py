@@ -10,6 +10,7 @@
 # This file must not read raw trapq buffers.
 
 import logging
+import importlib
 from collections import deque
 
 KEEP_HISTORY_S = 5.0
@@ -23,6 +24,7 @@ class DrukMixPlannerProbe:
         self.mcu = None
         self.extruder_name = config.get('extruder', 'extruder')
         self.extruder_obj = None
+        self.extruder_axis_index = 3
         self._orig_process_move = None
         self._moves = deque()
 
@@ -35,6 +37,11 @@ class DrukMixPlannerProbe:
         )
         self.print_gap_merge_s = config.getfloat(
             'print_gap_merge_s', 0.75, minval=0.0
+        )
+        # Optional: raise host-side lookahead buffer target so planned horizon
+        # can extend beyond the default ~1s behavior when explicitly requested.
+        self.host_buffer_target_s = config.getfloat(
+            'host_buffer_target_s', 0.0, minval=0.0, maxval=30.0
         )
 
         self.status = {
@@ -54,6 +61,8 @@ class DrukMixPlannerProbe:
         self.mcu = self.printer.lookup_object('mcu', None)
         self.extruder_obj = self.printer.lookup_object(self.extruder_name, None)
         self._install_hook()
+        self._resolve_extruder_axis_index()
+        self._apply_host_buffer_target()
 
         self.status['available'] = bool(
             self.toolhead is not None
@@ -68,6 +77,57 @@ class DrukMixPlannerProbe:
             self.status['available'],
             self._orig_process_move is not None,
         )
+
+    def _resolve_extruder_axis_index(self):
+        self.extruder_axis_index = 3
+        if self.toolhead is None:
+            return
+        try:
+            extra_axes = list(getattr(self.toolhead, 'extra_axes', []) or [])
+        except Exception:
+            return
+
+        for i, ea in enumerate(extra_axes):
+            if ea is None:
+                continue
+            try:
+                name = ea.get_name()
+            except Exception:
+                name = None
+            if name == self.extruder_name:
+                self.extruder_axis_index = 3 + i
+                return
+
+    def _apply_host_buffer_target(self):
+        target = max(0.0, float(self.host_buffer_target_s))
+        if target <= 0.0 or self.toolhead is None:
+            return
+
+        try:
+            toolhead_mod = importlib.import_module('toolhead')
+
+            prev_high = float(getattr(toolhead_mod, 'BUFFER_TIME_HIGH', 1.0))
+            prev_start = float(getattr(toolhead_mod, 'BUFFER_TIME_START', 0.25))
+
+            toolhead_mod.BUFFER_TIME_HIGH = target
+            if prev_start >= target:
+                toolhead_mod.BUFFER_TIME_START = max(0.05, target * 0.25)
+
+            lookahead = getattr(self.toolhead, 'lookahead', None)
+            if lookahead is not None:
+                lookahead.set_flush_time(target)
+
+            logging.warning(
+                "drukmix_planner_probe host buffer target applied: high %.3f -> %.3f (start %.3f)",
+                prev_high,
+                target,
+                float(getattr(toolhead_mod, 'BUFFER_TIME_START', prev_start)),
+            )
+        except Exception:
+            logging.exception(
+                "drukmix_planner_probe failed to apply host_buffer_target_s=%.3f",
+                target,
+            )
 
     def _install_hook(self):
         if self.extruder_obj is None:
@@ -239,6 +299,62 @@ class DrukMixPlannerProbe:
             return self._print_window_from_move(m)
         return None, None
 
+    def _pending_lookahead_print_window(self, est):
+        if est is None or self.toolhead is None:
+            return None, None
+
+        lookahead = getattr(self.toolhead, 'lookahead', None)
+        queue = getattr(lookahead, 'queue', None)
+        if not queue:
+            return None, None
+
+        try:
+            t_cursor = max(float(est), float(getattr(self.toolhead, 'print_time', est)))
+        except Exception:
+            t_cursor = float(est)
+
+        gap_tolerance_s = max(0.0, float(self.print_gap_merge_s))
+        window_start = None
+        window_end = None
+
+        for mv in queue:
+            try:
+                seg_t = float(mv.accel_t) + float(mv.cruise_t) + float(mv.decel_t)
+            except Exception:
+                continue
+            if seg_t <= 0.0:
+                continue
+
+            m_start = t_cursor
+            m_end = t_cursor + seg_t
+            t_cursor = m_end
+
+            axis_r = 0.0
+            try:
+                axis_r = float(mv.axes_r[self.extruder_axis_index])
+            except Exception:
+                try:
+                    axis_r = float(mv.axes_r[3])
+                except Exception:
+                    axis_r = 0.0
+
+            if axis_r <= 0.0:
+                continue
+
+            if window_start is None:
+                window_start = m_start
+                window_end = m_end
+                continue
+
+            if m_start > (window_end + gap_tolerance_s):
+                break
+            if m_end > window_end:
+                window_end = m_end
+
+        if window_start is None:
+            return None, None
+        return window_start, window_end
+
     def get_status(self, eventtime):
         est = self._estimated_print_time(eventtime)
         self._prune(est)
@@ -262,6 +378,19 @@ class DrukMixPlannerProbe:
             next_window_start, next_window_end = self._next_print_window_after(
                 current_window_end['end_time']
             )
+
+        pending_start_s, pending_end_s = self._pending_lookahead_print_window(est)
+        if pending_start_s is not None:
+            pending_start = {
+                'start_time': float(pending_start_s),
+                'end_time': float(pending_end_s),
+            }
+            pending_end = pending_start
+            if (
+                next_window_start is None
+                or pending_start['start_time'] < next_window_start['start_time']
+            ):
+                next_window_start, next_window_end = pending_start, pending_end
 
         print_window_active = (current_window_start is not None) or (next_window_start is not None)
 
