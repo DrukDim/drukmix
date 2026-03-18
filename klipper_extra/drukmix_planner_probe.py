@@ -5,29 +5,14 @@
 # - keep runtime impact low
 # - avoid changing actual print behavior
 #
-# Research approach in this version:
-# - do NOT try to infer future planner state from motion_report history access
+# Production approach in this version:
 # - mirror extruder moves at enqueue time via PrinterExtruder.process_move()
-# - compute future planned velocity from the mirrored queue
+# - expose compact planner-authoritative host control signals
 #
-# This file is instrumentation-only.
+# This file is part of the production planner signal path.
 
 import logging
 from collections import deque
-
-HORIZONS = (
-    ("planned_v_now", 0.0),
-    ("planned_v_250ms", 0.250),
-    ("planned_v_500ms", 0.500),
-    ("planned_v_1000ms", 1.000),
-    ("planned_v_2000ms", 2.000),
-    ("planned_v_4000ms", 4.000),
-    ("planned_v_6000ms", 6.000),
-    ("planned_v_8000ms", 8.000),
-    ("planned_v_10000ms", 10.000),
-    ("planned_v_12000ms", 12.000),
-    ("planned_v_15000ms", 15.000),
-)
 
 KEEP_HISTORY_S = 5.0
 
@@ -58,6 +43,7 @@ class DrukMixPlannerProbe:
             'print_window_active': False,
             'time_to_print_start_s': None,
             'time_to_print_stop_s': None,
+            'control_velocity_mms': 0.0,
         }
         self.printer.register_event_handler("klippy:connect", self._handle_connect)
 
@@ -178,12 +164,6 @@ class DrukMixPlannerProbe:
 
         return None
 
-    def _planned_velocity_at(self, t):
-        m = self._find_move_at(t)
-        if m is None:
-            return None
-        return self._velocity_in_move(m, t)
-
     def _is_print_move(self, m):
         if m is None:
             return False
@@ -239,6 +219,14 @@ class DrukMixPlannerProbe:
 
         print_window_active = last_print is not None
 
+        control_velocity_mms = 0.0
+        if est is not None:
+            active_move = self._find_move_at(est)
+            if self._is_print_move(active_move):
+                v = self._velocity_in_move(active_move, est)
+                if v is not None:
+                    control_velocity_mms = max(0.0, float(v))
+
         out = {
             'available': self.status['available'],
             'extruder': self.extruder_name,
@@ -249,21 +237,15 @@ class DrukMixPlannerProbe:
             'print_window_active': bool(print_window_active),
             'time_to_print_start_s': time_to_print_start_s,
             'time_to_print_stop_s': time_to_print_stop_s,
+            'control_velocity_mms': control_velocity_mms,
         }
-
-        if est is not None:
-            for key, offset in HORIZONS:
-                out[key] = self._planned_velocity_at(est + offset)
-        else:
-            for key, _offset in HORIZONS:
-                out[key] = None
 
         self.status.update(out)
         if self.debug_enabled:
             first = self._moves[0]['start_time'] if self._moves else None
             last = self._moves[-1]['end_time'] if self._moves else None
             logging.info(
-                "drukmix_planner_probe status: est=%s moves=%d first=%s last=%s queue_end=%s tail=%s start_lookahead=%.3f stop_lookahead=%.3f t_start=%s t_stop=%s v_now=%s v_250=%s v_1000=%s v_4000=%s",
+                "drukmix_planner_probe status: est=%s moves=%d first=%s last=%s queue_end=%s tail=%s start_lookahead=%.3f stop_lookahead=%.3f t_start=%s t_stop=%s control_velocity=%s",
                 est,
                 len(self._moves),
                 first,
@@ -274,10 +256,7 @@ class DrukMixPlannerProbe:
                 self.pump_stop_lookahead_s,
                 time_to_print_start_s,
                 time_to_print_stop_s,
-                out.get('planned_v_now'),
-                out.get('planned_v_250ms'),
-                out.get('planned_v_1000ms'),
-                out.get('planned_v_4000ms'),
+                control_velocity_mms,
             )
         return dict(self.status)
 

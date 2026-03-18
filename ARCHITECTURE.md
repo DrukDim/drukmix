@@ -177,6 +177,42 @@ Implications:
 - planned demand is still not measured material flow and must not be presented as physical truth;
 - planner freshness must be monitored explicitly; stale planner data must fail safe.
 
+### Production planner contract
+
+`drukmix_planner_probe` production status contract must stay compact.
+
+Canonical production fields:
+- `queue_tail_s`
+- `print_window_active`
+- `time_to_print_start_s`
+- `time_to_print_stop_s`
+- `control_velocity_mms`
+
+Rules:
+- multi-horizon planner payload such as `planned_v_now`, `planned_v_250ms`, ..., `planned_v_15000ms` is not part of the production control contract;
+- research payload may exist only in explicitly temporary research/debug code paths;
+- host automatic orchestration must not depend on research-only planner payload fields.
+
+### Backend mode safety rule
+
+Backend mode is an independent safety/authority domain.
+
+Canonical meanings:
+- `AUTO` — automatic orchestration allowed;
+- `MANUAL` — automatic orchestration blocked;
+- `UNKNOWN` — automatic orchestration blocked.
+
+`UNKNOWN` must never be silently treated as equivalent to `AUTO`.
+
+### Current deployment-stage expectation
+
+At the current project stage, physical MANUAL/AUTO switching is not yet integrated as the final machine-facing control feature.
+
+Until that integration is intentionally added:
+- deployed automatic operation is expected to run in `AUTO`;
+- `UNKNOWN` is treated as an integration/contract problem, not as an acceptable production operating mode;
+- future physical mode switching must be integrated explicitly, not by weakening the `UNKNOWN` safety rule.
+
 This preserves the separation between:
 - planned printer demand,
 - backend/device health truth,

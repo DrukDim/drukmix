@@ -220,6 +220,37 @@ Related areas:
 - Moonraker status transport
 - planner timebase / queue mirroring
 
+### 9b. Research-style multi-horizon planner payload is still present in the runtime control path
+
+Status: active migration defect
+
+The runtime production path still contains `PLANNER_HORIZONS`, `planned_v_*`, and host-side planner horizon selection logic.
+
+Implication:
+- research instrumentation is still leaking into production control semantics;
+- host orchestration still depends on a non-canonical planner payload shape;
+- production contract cleanup must remove multi-horizon payload from the normal agent/probe runtime path.
+
+Related areas:
+- `drukmix_agent.py`
+- `klipper_extra/drukmix_planner_probe.py`
+
+### 9c. Backend mode `UNKNOWN` must block automatic orchestration until explicit mode integration is complete
+
+Status: active safety constraint
+
+`UNKNOWN` is not equivalent to `MANUAL`, but it is also not acceptable for automatic production pumping.
+
+Implication:
+- automatic pump orchestration must be blocked in `UNKNOWN`;
+- current deployment-stage expectation is `AUTO` operation until physical mode switching is intentionally integrated;
+- future MANUAL/AUTO selector support must be added explicitly, not by weakening `UNKNOWN` handling.
+
+Related areas:
+- backend-normalized status
+- `drukmix_agent.py`
+- runtime pause/safety logic
+
 ## Active checklist
 
 These items are intentionally preserved from the prior canonical checklist.

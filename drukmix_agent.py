@@ -22,26 +22,13 @@ from backend.bridge_usb_transport import BridgeUsbTransport
 from backend.backend_pumptpl import PumpTplBackend
 
 
-PLANNER_HORIZONS = (
-    ("planned_v_now", 0.0),
-    ("planned_v_250ms", 0.250),
-    ("planned_v_500ms", 0.500),
-    ("planned_v_1000ms", 1.000),
-    ("planned_v_2000ms", 2.000),
-    ("planned_v_4000ms", 4.000),
-    ("planned_v_6000ms", 6.000),
-    ("planned_v_8000ms", 8.000),
-    ("planned_v_10000ms", 10.000),
-    ("planned_v_12000ms", 12.000),
-    ("planned_v_15000ms", 15.000),
-)
-
 PLANNER_FIELD_NAMES = [
     "queue_tail_s",
     "print_window_active",
     "time_to_print_start_s",
     "time_to_print_stop_s",
-] + [name for name, _ in PLANNER_HORIZONS]
+    "control_velocity_mms",
+]
 
 
 def clamp(x: float, lo: float, hi: float) -> float:
@@ -103,10 +90,8 @@ class KlipperState:
     planner_print_window_active: bool = False
     planner_time_to_print_start_s: Optional[float] = None
     planner_time_to_print_stop_s: Optional[float] = None
+    planner_control_velocity_mms: float = 0.0
     planner_last_update_t: float = 0.0
-    planner_values: Dict[str, Optional[float]] = dataclasses.field(
-        default_factory=lambda: {name: None for name, _ in PLANNER_HORIZONS}
-    )
 
 
 @dataclasses.dataclass
@@ -267,43 +252,9 @@ def apply_status(ks: KlipperState, st: Dict[str, Any], now: float) -> None:
         if "time_to_print_stop_s" in pp:
             v = pp.get("time_to_print_stop_s")
             ks.planner_time_to_print_stop_s = None if v is None else _safe_float(v, 0.0)
-        for name, _ in PLANNER_HORIZONS:
-            if name in pp:
-                ks.planner_values[name] = None if pp.get(name) is None else _safe_float(pp.get(name), 0.0)
+        if "control_velocity_mms" in pp:
+            ks.planner_control_velocity_mms = max(0.0, _safe_float(pp.get("control_velocity_mms"), 0.0))
         ks.planner_last_update_t = now
-
-
-def planner_velocity_at(ks: KlipperState, lookahead_s: float) -> tuple[float, float]:
-    lookahead_s = max(0.0, float(lookahead_s))
-    for name, horizon_s in PLANNER_HORIZONS:
-        if horizon_s >= lookahead_s:
-            v = ks.planner_values.get(name)
-            return (0.0 if v is None else max(0.0, float(v)), float(horizon_s))
-    last_name, last_h = PLANNER_HORIZONS[-1]
-    v = ks.planner_values.get(last_name)
-    return (0.0 if v is None else max(0.0, float(v)), float(last_h))
-
-
-def planner_velocity_window_max(ks: KlipperState, lookahead_s: float) -> tuple[float, float]:
-    lookahead_s = max(0.0, float(lookahead_s))
-    best_v = 0.0
-    best_h = 0.0
-
-    for name, horizon_s in PLANNER_HORIZONS:
-        if horizon_s > lookahead_s:
-            break
-        v = ks.planner_values.get(name)
-        v = 0.0 if v is None else max(0.0, float(v))
-        if v >= best_v:
-            best_v = v
-            best_h = float(horizon_s)
-
-    if best_h == 0.0:
-        v0 = ks.planner_values.get("planned_v_now")
-        best_v = 0.0 if v0 is None else max(0.0, float(v0))
-        best_h = 0.0
-
-    return best_v, best_h
 
 
 def planner_is_fresh(cfg: Cfg, ks: KlipperState, now: float) -> bool:
@@ -312,36 +263,8 @@ def planner_is_fresh(cfg: Cfg, ks: KlipperState, now: float) -> bool:
     return (now - ks.planner_last_update_t) <= max(0.1, float(cfg.planner_stale_timeout_s))
 
 
-def select_control_velocity_meta(cfg: Cfg, ks: KlipperState, pump_running_hint: bool) -> tuple[float, float, float]:
-    queue_tail = max(0.0, float(ks.planner_queue_tail_s))
-
-    if not pump_running_hint:
-        requested_lookahead_s = cfg.pump_start_lookahead_s
-        effective_lookahead_s = min(max(0.0, float(requested_lookahead_s)), queue_tail)
-        vel, selected_horizon_s = planner_velocity_window_max(ks, effective_lookahead_s)
-        return vel, requested_lookahead_s, selected_horizon_s
-
-    stop_requested_lookahead_s = cfg.pump_stop_lookahead_s
-    stop_effective_lookahead_s = min(max(0.0, float(stop_requested_lookahead_s)), queue_tail)
-    stop_vel, stop_selected_horizon_s = planner_velocity_window_max(ks, stop_effective_lookahead_s)
-    if stop_vel <= 0.0:
-        return 0.0, stop_requested_lookahead_s, stop_selected_horizon_s
-
-    run_requested_lookahead_s = cfg.pump_run_lookahead_s
-    run_effective_lookahead_s = min(max(0.0, float(run_requested_lookahead_s)), queue_tail)
-    vel, selected_horizon_s = planner_velocity_window_max(ks, run_effective_lookahead_s)
-    return vel, run_requested_lookahead_s, selected_horizon_s
-
-
-def select_control_velocity(cfg: Cfg, ks: KlipperState, pump_running_hint: bool) -> float:
-    vel, _, _ = select_control_velocity_meta(cfg, ks, pump_running_hint)
-    return vel
-
-
-def pump_should_run(control_velocity: float, target_pct: float) -> bool:
-    if target_pct > 0.5:
-        return True
-    return abs(float(control_velocity)) > 0.1
+def select_control_velocity(cfg: Cfg, ks: KlipperState) -> float:
+    return max(0.0, float(ks.planner_control_velocity_mms))
 
 
 def planner_semantic_should_run(cfg: Cfg, ks: KlipperState, pump_running_hint: bool) -> tuple[bool, str]:
@@ -359,6 +282,15 @@ def planner_semantic_should_run(cfg: Cfg, ks: KlipperState, pump_running_hint: b
         return True, "prestart_or_print"
 
     return False, "waiting_for_prestart"
+
+
+def mode_allows_auto(control_mode: str) -> tuple[bool, str]:
+    mode = str(control_mode or "UNKNOWN")
+    if mode == "AUTO":
+        return True, "auto"
+    if mode == "MANUAL":
+        return False, "manual"
+    return False, "unknown"
 
 
 
@@ -703,12 +635,11 @@ async def run_agent(cfg_path: str):
                             if cfg.planner_debug_log and "drukmix_planner_probe" in st0:
                                 pp = st0["drukmix_planner_probe"]
                                 logging.info(
-                                    "drukmix agent probe update: queue_tail_s=%s v_now=%s v_250=%s v_1000=%s v_4000=%s",
+                                    "drukmix agent probe update: queue_tail_s=%s t_start=%s t_stop=%s control_velocity=%s",
                                     pp.get("queue_tail_s"),
-                                    pp.get("planned_v_now"),
-                                    pp.get("planned_v_250ms"),
-                                    pp.get("planned_v_1000ms"),
-                                    pp.get("planned_v_4000ms"),
+                                    pp.get("time_to_print_start_s"),
+                                    pp.get("time_to_print_stop_s"),
+                                    pp.get("control_velocity_mms"),
                                 )
                         continue
 
@@ -719,24 +650,7 @@ async def run_agent(cfg_path: str):
                     method, params = rc
 
                     st_for_status = backend.poll_status()
-                    control_velocity_for_status = select_control_velocity(
-                        cfg,
-                        ks,
-                        bool(st_for_status.running) or last_target_pct > 0.5,
-                    )
-
-                    if method == "drukmix_ping":
-                        await maybe_respond(mr, cfg.ui_notify, "command", "DrukMix: ping OK")
-                        continue
-
-                    if method == "drukmix_status":
-                        await maybe_respond(
-                            mr,
-                            cfg.ui_notify,
-                            "command",
-                            build_status_text(st_for_status, cfg, ks, control_velocity_for_status),
-                        )
-                        continue
+                    control_velocity_for_status = select_control_velocity(cfg, ks)
 
                     if method == "drukmix_stop":
                         fs.active = False
@@ -855,11 +769,19 @@ async def run_agent(cfg_path: str):
                 else:
                     last_fault_notify_key = None
 
-                control_velocity = select_control_velocity(
-                    cfg,
-                    ks,
-                    bool(st.running) or last_target_pct > 0.5,
-                )
+                control_velocity = select_control_velocity(cfg, ks)
+
+                semantic_should_run_now = False
+                semantic_reason = "idle"
+                if planner_valid:
+                    semantic_should_run_now, semantic_reason = planner_semantic_should_run(
+                        cfg,
+                        ks,
+                        bool(st.running) or last_target_pct > 0.5,
+                    )
+
+                auto_allowed, mode_reason = mode_allows_auto(st.control_mode)
+                should_run_now = semantic_should_run_now and auto_allowed
 
                 if force_stop_due_to_fault:
                     target_pct = 0.0
@@ -870,6 +792,10 @@ async def run_agent(cfg_path: str):
                     rev = False
                     stop = False
                 elif not planner_valid:
+                    target_pct = 0.0
+                    rev = False
+                    stop = True
+                elif not auto_allowed:
                     target_pct = 0.0
                     rev = False
                     stop = True
@@ -891,16 +817,6 @@ async def run_agent(cfg_path: str):
                 else:
                     backend.set_auto_target_pct(target_pct, rev)
                     last_target_pct = target_pct
-
-                semantic_should_run_now = False
-                semantic_reason = "idle"
-                if planner_valid:
-                    semantic_should_run_now, semantic_reason = planner_semantic_should_run(
-                        cfg,
-                        ks,
-                        bool(st.running) or last_target_pct > 0.5,
-                    )
-                should_run_now = semantic_should_run_now
 
                 if st.link_ok or (not should_run_now):
                     pump_offline_since = None
@@ -944,26 +860,27 @@ async def run_agent(cfg_path: str):
                         pass
                     await maybe_respond(mr, cfg.ui_notify, "error", "DrukMix: pump offline")
 
-                if cfg.pause_on_manual_mode and should_run_now and st.control_mode != "AUTO":
+                if cfg.pause_on_manual_mode and semantic_should_run_now and not auto_allowed:
                     log.warning(
-                        "DBG pause reason=manual_mode planner_valid=%d tail_s=%.3f mode=%s link_ok=%d ctrl_vel=%.3f target_pct=%.2f",
+                        "DBG pause reason=blocked_mode planner_valid=%d tail_s=%.3f mode=%s link_ok=%d ctrl_vel=%.3f target_pct=%.2f mode_reason=%s",
                         int(planner_valid),
                         ks.planner_queue_tail_s,
                         st.control_mode,
                         int(st.link_ok),
                         control_velocity,
                         target_pct,
+                        mode_reason,
                     )
                     try:
                         await mr.pause_print()
                     except Exception:
                         pass
-                    await maybe_respond(mr, cfg.ui_notify, "error", f"DrukMix: manual mode {st.control_mode}")
+                    await maybe_respond(mr, cfg.ui_notify, "error", f"DrukMix: blocked mode {st.control_mode}")
 
                 if now - last_log_t >= max(0.2, cfg.log_period_s):
                     last_log_t = now
                     log.info(
-                        "drukmix: backend=%s mode=%s planner_valid=%d tail_s=%.3f ctrl_vel=%.3f ef=%.3f target_pct=%.2f rev=%d link_ok=%d fault=%d code=%d age_ms=%s target_mlpm=%d hw_raw=%d pump_flags=%d ack_seq=%d applied=%d start_lookahead_s=%.3f run_lookahead_s=%.3f stop_lookahead_s=%.3f stale_timeout_s=%.3f print_window=%d t_start=%s t_stop=%s pump_cmd=%d cmd_reason=%s",
+                        "drukmix: backend=%s mode=%s planner_valid=%d tail_s=%.3f ctrl_vel=%.3f ef=%.3f target_pct=%.2f rev=%d link_ok=%d fault=%d code=%d age_ms=%s target_mlpm=%d hw_raw=%d pump_flags=%d ack_seq=%d applied=%d start_lookahead_s=%.3f run_lookahead_s=%.3f stop_lookahead_s=%.3f stale_timeout_s=%.3f print_window=%d t_start=%s t_stop=%s pump_cmd=%d cmd_reason=%s mode_reason=%s",
                         st.backend,
                         st.control_mode,
                         int(planner_valid),
@@ -990,6 +907,7 @@ async def run_agent(cfg_path: str):
                         ks.planner_time_to_print_stop_s,
                         int(should_run_now),
                         semantic_reason,
+                        mode_reason,
                     )
 
                 await asyncio.sleep(1.0 / max(cfg.update_hz, 0.5))
