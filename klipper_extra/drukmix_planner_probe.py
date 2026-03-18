@@ -182,7 +182,8 @@ class DrukMixPlannerProbe:
         for m in self._moves:
             if not self._is_print_move(m):
                 continue
-            if m['end_time'] < est:
+            # Future-start candidate for prestart; do not reuse already-started moves.
+            if m['start_time'] < est:
                 continue
             return m
         return None
@@ -220,6 +221,19 @@ class DrukMixPlannerProbe:
 
         return first_move, last_move
 
+    def _next_print_window_after(self, t_after):
+        if t_after is None:
+            return None, None
+
+        gap_tolerance_s = 1e-6
+        for m in self._moves:
+            if not self._is_print_move(m):
+                continue
+            if m['start_time'] <= (float(t_after) + gap_tolerance_s):
+                continue
+            return self._print_window_from_move(m)
+        return None, None
+
     def get_status(self, eventtime):
         est = self._estimated_print_time(eventtime)
         self._prune(est)
@@ -236,15 +250,22 @@ class DrukMixPlannerProbe:
                 active_print = candidate
 
         first_print = self._first_print_move_after(est)
-        next_print = active_print if active_print is not None else first_print
-        next_window_start, next_window_end = self._print_window_from_move(next_print)
+        next_window_start, next_window_end = self._print_window_from_move(first_print)
         current_window_start, current_window_end = self._print_window_from_move(active_print)
 
-        print_window_active = next_window_start is not None
+        if current_window_end is not None:
+            next_window_start, next_window_end = self._next_print_window_after(
+                current_window_end['end_time']
+            )
+
+        print_window_active = (current_window_start is not None) or (next_window_start is not None)
 
         time_to_print_start_s = None
-        if est is not None and next_window_start is not None:
-            time_to_print_start_s = max(0.0, float(next_window_start['start_time']) - float(est))
+        if est is not None:
+            if next_window_start is not None:
+                time_to_print_start_s = max(0.0, float(next_window_start['start_time']) - float(est))
+            elif current_window_start is not None:
+                time_to_print_start_s = 0.0
 
         time_to_print_stop_s = None
         if est is not None and current_window_end is not None:
