@@ -677,6 +677,19 @@ async def run_agent(cfg_path: str):
                     st_for_status = backend.poll_status()
                     control_velocity_for_status = select_control_velocity(cfg, ks)
 
+                    if method == "drukmix_ping":
+                        await maybe_respond(mr, cfg.ui_notify, "command", "DrukMix: ping OK")
+                        continue
+
+                    if method == "drukmix_status":
+                        await maybe_respond(
+                            mr,
+                            cfg.ui_notify,
+                            "command",
+                            build_status_text(st_for_status, cfg, ks, control_velocity_for_status),
+                        )
+                        continue
+
                     if method == "drukmix_stop":
                         fs.active = False
                         fs.pct = 0.0
