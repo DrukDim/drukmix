@@ -65,6 +65,8 @@ class Cfg:
     pump_start_lookahead_s: float
     pump_run_lookahead_s: float
     pump_stop_lookahead_s: float
+    pump_prestart_pct: float
+    pump_prestop_ramp_s: float
     planner_stale_timeout_s: float
 
     update_hz: float
@@ -163,6 +165,8 @@ def load_config(path: str) -> Cfg:
         pump_start_lookahead_s=_get_float(s, "pump_start_lookahead_s", 4.0),
         pump_run_lookahead_s=_get_float(s, "pump_run_lookahead_s", 1.0),
         pump_stop_lookahead_s=_get_float(s, "pump_stop_lookahead_s", 3.0),
+        pump_prestart_pct=_get_float(s, "pump_prestart_pct", 18.0),
+        pump_prestop_ramp_s=_get_float(s, "pump_prestop_ramp_s", 3.0),
         planner_stale_timeout_s=_get_float(s, "planner_stale_timeout_s", 1.5),
 
         update_hz=_get_float(s, "update_hz", 6.0),
@@ -301,6 +305,18 @@ def mode_allows_auto(control_mode: str) -> tuple[bool, str]:
         return False, "manual"
     return False, "unknown"
 
+
+def prestop_ramp_pct(cfg: Cfg, ks: KlipperState, nominal_target_pct: float) -> float:
+    t_stop = ks.planner_time_to_print_stop_s
+    if t_stop is None:
+        return max(0.0, float(nominal_target_pct))
+
+    ramp_s = max(0.0, float(cfg.pump_prestop_ramp_s))
+    if ramp_s <= 0.0:
+        return 0.0
+
+    x = max(0.0, min(1.0, float(t_stop) / ramp_s))
+    return max(0.0, float(nominal_target_pct)) * x
 
 
 async def wait_moonraker_ready(log, ws_url: str, timeout_s: float = 30.0):
@@ -819,6 +835,15 @@ async def run_agent(cfg_path: str):
                     target_pct = out.target_pct
                     rev = out.rev
                     stop = out.stop
+
+                    if semantic_reason == "prestart_or_print" and not bool(st.running):
+                        target_pct = max(0.0, float(cfg.pump_prestart_pct))
+                        rev = False
+                        stop = target_pct <= 0.0
+                    elif semantic_reason == "prestop":
+                        target_pct = prestop_ramp_pct(cfg, ks, out.target_pct)
+                        rev = False
+                        stop = target_pct <= 0.0
 
                 if stop:
                     backend.stop()
