@@ -22,11 +22,11 @@ PRINTER_LOG_DIR="${PRINTER_LOG_DIR:-$USER_HOME/printer_data/logs}"
 
 CFG_TEMPLATE="$REPO_DIR/config_examples/drukmix.cfg"
 MACROS_TEMPLATE="$REPO_DIR/config_examples/drukmix_macros.cfg"
-RESEARCH_TEMPLATE="$REPO_DIR/config_examples/drukmix_research.cfg"
+PLANNER_TEMPLATE="$REPO_DIR/config_examples/drukmix_planner.cfg"
 
 CFG_DST="$PRINTER_CFG_DIR/drukmix.cfg"
 MACROS_DST="$PRINTER_CFG_DIR/drukmix_macros.cfg"
-RESEARCH_DST="$PRINTER_CFG_DIR/drukmix_research.cfg"
+PLANNER_DST="$PRINTER_CFG_DIR/drukmix_planner.cfg"
 
 PRINTER_CFG="$PRINTER_CFG_DIR/printer.cfg"
 SERVICE_TEMPLATE="$REPO_DIR/systemd/drukmix.service"
@@ -40,7 +40,7 @@ require_repo() {
   test -f "$REPO_DIR/drukmix_agent.py"
   test -f "$CFG_TEMPLATE"
   test -f "$MACROS_TEMPLATE"
-  test -f "$RESEARCH_TEMPLATE"
+  test -f "$PLANNER_TEMPLATE"
   test -f "$SERVICE_TEMPLATE"
 }
 
@@ -114,13 +114,34 @@ install_macros_if_missing() {
   fi
 }
 
-install_research_if_missing() {
-  if [[ ! -f "$RESEARCH_DST" ]]; then
-    cp "$RESEARCH_TEMPLATE" "$RESEARCH_DST"
-    echo "Installed default research config: $RESEARCH_DST"
+install_planner_if_missing() {
+  if [[ ! -f "$PLANNER_DST" ]]; then
+    cp "$PLANNER_TEMPLATE" "$PLANNER_DST"
+    echo "Installed default planner config: $PLANNER_DST"
   else
-    echo "Keeping existing research config: $RESEARCH_DST"
+    echo "Keeping existing planner config: $PLANNER_DST"
   fi
+}
+
+remove_file_if_present() {
+  local path="$1"
+  rm -f "$path"
+}
+
+remove_include_line() {
+  local include_line="$1"
+  PRINTER_CFG="$PRINTER_CFG" INCLUDE_LINE="$include_line" python3 - <<'PY2'
+from pathlib import Path
+import os
+
+p = Path(os.environ["PRINTER_CFG"])
+needle = os.environ["INCLUDE_LINE"]
+
+lines = p.read_text().splitlines()
+out = [line for line in lines if line.strip() != needle]
+p.write_text("\n".join(out) + "\n")
+print(f"normalized {p} without {needle}")
+PY2
 }
 
 patch_cfg_if_needed() {
@@ -189,7 +210,8 @@ PY
 
 ensure_required_includes() {
   ensure_include_once "[include drukmix_macros.cfg]"
-  ensure_include_once "[include drukmix_research.cfg]"
+  remove_include_line "[include drukmix_research.cfg]"
+  ensure_include_once "[include drukmix_planner.cfg]"
 }
 
 install_service() {
@@ -240,12 +262,12 @@ install_klipper_extra_if_present() {
   fi
 
   if [[ ! -d "$KLIPPER_DIR/klippy/extras" ]]; then
-    echo "klipper extras dir not found, skipping experimental extra: $KLIPPER_DIR/klippy/extras"
+    echo "klipper extras dir not found, skipping planner extra: $KLIPPER_DIR/klippy/extras"
     return 0
   fi
 
   install -m 0644 "$KLIPPER_EXTRA_SRC" "$KLIPPER_EXTRA_DST"
-  echo "installed experimental klipper extra: $KLIPPER_EXTRA_DST"
+  echo "installed planner klipper extra: $KLIPPER_EXTRA_DST"
 }
 
 bridge_status() {
@@ -271,7 +293,8 @@ do_install() {
   compile_check
   install_cfg_if_missing
   install_macros_if_missing
-  install_research_if_missing
+  install_planner_if_missing
+  remove_file_if_present "$PRINTER_CFG_DIR/drukmix_research.cfg"
   patch_cfg_if_needed
   ensure_required_includes
   install_service
@@ -293,7 +316,8 @@ do_update() {
   git -C "$REPO_DIR" pull --ff-only
   ensure_venv
   compile_check
-  install_research_if_missing
+  install_planner_if_missing
+  remove_file_if_present "$PRINTER_CFG_DIR/drukmix_research.cfg"
   patch_cfg_if_needed
   ensure_required_includes
   install_service
@@ -311,8 +335,13 @@ do_purge() {
   sudo systemctl daemon-reload
 
   rm -f "$MACROS_DST"
-  rm -f "$RESEARCH_DST"
+  rm -f "$PLANNER_DST"
+  rm -f "$PRINTER_CFG_DIR/drukmix_research.cfg"
   rm -f "$KLIPPER_EXTRA_DST"
+
+  remove_include_line "[include drukmix_macros.cfg]"
+  remove_include_line "[include drukmix_planner.cfg]"
+  remove_include_line "[include drukmix_research.cfg]"
 
   echo
   echo "Purge completed."
@@ -320,7 +349,8 @@ do_purge() {
   echo "Kept venv: $REPO_DIR/.venv"
   echo "Kept config: $CFG_DST"
   echo "Removed live macros file: $MACROS_DST"
-  echo "printer.cfg was not modified except possible existing include line."
+  echo "Removed live planner config: $PLANNER_DST"
+  echo "Removed planner include lines from printer.cfg"
 }
 
 do_restart() {
@@ -345,10 +375,10 @@ do_status() {
   echo "printer log dir: $PRINTER_LOG_DIR"
   echo "config: $CFG_DST"
   echo "macros: $MACROS_DST"
-  echo "research config: $RESEARCH_DST"
+  echo "planner config: $PLANNER_DST"
   echo "service: $SERVICE_DST"
   echo "klipper dir: $KLIPPER_DIR"
-  echo "experimental klipper extra: $KLIPPER_EXTRA_DST"
+  echo "planner klipper extra: $KLIPPER_EXTRA_DST"
 
   echo
   echo "== service =="
@@ -380,9 +410,9 @@ do_doctor() {
   [[ -f "$CFG_DST" ]] && echo "config: ok ($CFG_DST)" || echo "config: missing ($CFG_DST)"
   [[ -f "$PRINTER_CFG" ]] && echo "printer.cfg: ok ($PRINTER_CFG)" || echo "printer.cfg: missing ($PRINTER_CFG)"
   [[ -f "$MACROS_DST" ]] && echo "macros: ok ($MACROS_DST)" || echo "macros: missing ($MACROS_DST)"
-  [[ -f "$RESEARCH_DST" ]] && echo "research config: ok ($RESEARCH_DST)" || echo "research config: missing ($RESEARCH_DST)"
+  [[ -f "$PLANNER_DST" ]] && echo "planner config: ok ($PLANNER_DST)" || echo "planner config: missing ($PLANNER_DST)"
   [[ -f "$SERVICE_DST" ]] && echo "service file: ok ($SERVICE_DST)" || echo "service file: missing ($SERVICE_DST)"
-  [[ -f "$KLIPPER_EXTRA_DST" ]] && echo "experimental klipper extra: ok ($KLIPPER_EXTRA_DST)" || echo "experimental klipper extra: missing ($KLIPPER_EXTRA_DST)"
+  [[ -f "$KLIPPER_EXTRA_DST" ]] && echo "planner klipper extra: ok ($KLIPPER_EXTRA_DST)" || echo "planner klipper extra: missing ($KLIPPER_EXTRA_DST)"
 
   echo
   bridge_status
