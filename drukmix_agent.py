@@ -280,13 +280,21 @@ def planner_semantic_should_run(cfg: Cfg, ks: KlipperState, pump_running_hint: b
     if not ks.planner_print_window_active:
         return False, "idle"
 
-    if pump_running_hint:
-        t_stop = ks.planner_time_to_print_stop_s
-        if t_stop is not None and t_stop <= max(0.0, float(cfg.pump_stop_lookahead_s)):
-            return False, "prestop"
-        return True, "print"
-
     t_start = ks.planner_time_to_print_start_s
+    t_stop = ks.planner_time_to_print_stop_s
+    active_print_window = t_stop is not None
+
+    if pump_running_hint:
+        if active_print_window:
+            if t_stop <= max(0.0, float(cfg.pump_stop_lookahead_s)):
+                return False, "prestop"
+            return True, "print"
+
+        # We are between print windows: keep spinning only for short gaps.
+        if t_start is not None and t_start <= max(0.0, float(cfg.pump_run_lookahead_s)):
+            return True, "run_hold_gap"
+        return False, "gap_wait"
+
     if t_start is not None and t_start <= max(0.0, float(cfg.pump_start_lookahead_s)):
         return True, "prestart_or_print"
 
