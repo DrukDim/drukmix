@@ -48,10 +48,6 @@ class DrukMixPlannerProbe:
             'time_to_print_start_s': None,
             'time_to_print_stop_s': None,
             'control_velocity_mms': 0.0,
-            'first_print_start_time': None,
-            'est_print_time': None,
-            'planner_horizon_to_first_print': None,
-            'moves_in_queue': 0,
         }
 
         self.printer.register_event_handler("klippy:connect", self._handle_connect)
@@ -102,6 +98,7 @@ class DrukMixPlannerProbe:
                 'start_v': float(start_v),
                 'cruise_v': float(cruise_v),
                 'accel': float(accel),
+                'axis_r': float(axis_r),
             })
 
             probe._debug_move_counter += 1
@@ -181,6 +178,8 @@ class DrukMixPlannerProbe:
             return False
         if m['end_time'] <= m['start_time']:
             return False
+        if m.get('axis_r', 0.0) <= 0.0:
+            return False
         if max(abs(m['start_v']), abs(m['cruise_v'])) <= self.print_velocity_epsilon:
             return False
         return True
@@ -207,6 +206,28 @@ class DrukMixPlannerProbe:
             return m
         return None
 
+    def _print_window_from_move(self, seed_move):
+        if seed_move is None or not self._is_print_move(seed_move):
+            return None, None
+
+        gap_tolerance_s = 1e-6
+        first_move = seed_move
+        last_move = seed_move
+        in_window = False
+
+        for m in self._moves:
+            if m is seed_move:
+                in_window = True
+                continue
+            if not in_window or not self._is_print_move(m):
+                continue
+            if m['start_time'] > (last_move['end_time'] + gap_tolerance_s):
+                break
+            if m['end_time'] > last_move['end_time']:
+                last_move = m
+
+        return first_move, last_move
+
     def get_status(self, eventtime):
         est = self._estimated_print_time(eventtime)
         self._prune(est)
@@ -216,47 +237,43 @@ class DrukMixPlannerProbe:
         if est is not None and queue_end is not None:
             queue_tail_s = max(0.0, float(queue_end) - float(est))
 
+        active_print = None
+        if est is not None:
+            candidate = self._find_move_at(est)
+            if self._is_print_move(candidate):
+                active_print = candidate
+
         first_print = self._first_print_move_after(est)
-        last_print = self._last_print_move_after(est)
+        next_print = active_print if active_print is not None else first_print
+        next_window_start, next_window_end = self._print_window_from_move(next_print)
+        current_window_start, current_window_end = self._print_window_from_move(active_print)
 
-        first_print_start_time = None
-        if first_print is not None:
-            first_print_start_time = float(first_print['start_time'])
-
-        planner_horizon_to_first_print = None
-        if est is not None and first_print_start_time is not None:
-            planner_horizon_to_first_print = max(
-                0.0,
-                float(first_print_start_time) - float(est),
-            )
-
-        print_window_active = last_print is not None
+        print_window_active = next_window_start is not None
 
         time_to_print_start_s = None
-        if est is not None and first_print is not None:
-            time_to_print_start_s = max(0.0, float(first_print['start_time']) - float(est))
+        if est is not None and next_window_start is not None:
+            time_to_print_start_s = max(0.0, float(next_window_start['start_time']) - float(est))
 
         time_to_print_stop_s = None
-        if est is not None and last_print is not None:
-            time_to_print_stop_s = max(0.0, float(last_print['end_time']) - float(est))
+        if est is not None and current_window_end is not None:
+            time_to_print_stop_s = max(0.0, float(current_window_end['end_time']) - float(est))
 
         control_velocity_mms = 0.0
         if est is not None:
-            active_move = self._find_move_at(est)
-            if self._is_print_move(active_move):
-                v = self._velocity_in_move(active_move, est)
+            if active_print is not None:
+                v = self._velocity_in_move(active_print, est)
                 if v is not None:
                     control_velocity_mms = max(0.0, float(v))
             elif (
-                first_print is not None
+                next_window_start is not None
                 and time_to_print_start_s is not None
                 and time_to_print_start_s <= self.pump_start_lookahead_s
             ):
                 sample_t = min(
-                    first_print['end_time'],
-                    first_print['start_time'] + 0.05,
+                    next_window_start['end_time'],
+                    next_window_start['start_time'] + 0.05,
                 )
-                v = self._velocity_in_move(first_print, sample_t)
+                v = self._velocity_in_move(next_window_start, sample_t)
                 if v is not None:
                     control_velocity_mms = max(0.0, float(v))
 
@@ -268,10 +285,6 @@ class DrukMixPlannerProbe:
             'time_to_print_start_s': time_to_print_start_s,
             'time_to_print_stop_s': time_to_print_stop_s,
             'control_velocity_mms': control_velocity_mms,
-            'first_print_start_time': first_print_start_time,
-            'est_print_time': est,
-            'planner_horizon_to_first_print': planner_horizon_to_first_print,
-            'moves_in_queue': len(self._moves),
         }
 
         self.status.update(out)
@@ -280,14 +293,13 @@ class DrukMixPlannerProbe:
             first_t = self._moves[0]['start_time'] if self._moves else None
             last_t = self._moves[-1]['end_time'] if self._moves else None
             logging.info(
-                "drukmix_planner_probe status: est=%s moves=%d first=%s last=%s tail=%s first_print_start_time=%s horizon_to_first=%s t_start=%s t_stop=%s control_velocity=%s",
+                "drukmix_planner_probe status: est=%s moves=%d first=%s last=%s tail=%s active=%s next_start=%s current_stop=%s control_velocity=%s",
                 est,
                 len(self._moves),
                 first_t,
                 last_t,
                 queue_tail_s,
-                first_print_start_time,
-                planner_horizon_to_first_print,
+                active_print['start_time'] if active_print is not None else None,
                 time_to_print_start_s,
                 time_to_print_stop_s,
                 control_velocity_mms,

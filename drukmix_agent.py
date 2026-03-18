@@ -28,10 +28,6 @@ PLANNER_FIELD_NAMES = [
     "time_to_print_start_s",
     "time_to_print_stop_s",
     "control_velocity_mms",
-    "first_print_start_time",
-    "est_print_time",
-    "planner_horizon_to_first_print",
-    "moves_in_queue",
 ]
 
 
