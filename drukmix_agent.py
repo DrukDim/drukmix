@@ -288,7 +288,9 @@ def planner_semantic_should_run(cfg: Cfg, ks: KlipperState, pump_running_hint: b
     # on backend "running" reporting, which can lag or be unavailable.
     if active_print_window:
         if t_stop <= max(0.0, float(cfg.pump_stop_lookahead_s)):
-            return False, "prestop"
+            # Keep command asserted during prestop and let target ramp logic
+            # taper output; dropping command here causes premature hard-off.
+            return True, "prestop"
         return True, "print"
 
     # No active print window: rely on horizon timing for prestart.
