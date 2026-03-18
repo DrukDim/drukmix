@@ -33,6 +33,9 @@ class DrukMixPlannerProbe:
         self.print_velocity_epsilon = config.getfloat(
             'print_velocity_epsilon', 0.001, minval=0.0
         )
+        self.print_gap_merge_s = config.getfloat(
+            'print_gap_merge_s', 0.75, minval=0.0
+        )
 
         self.status = {
             'available': False,
@@ -203,7 +206,9 @@ class DrukMixPlannerProbe:
         if seed_move is None or not self._is_print_move(seed_move):
             return None, None
 
-        gap_tolerance_s = 1e-6
+        # Merge short non-print interruptions (travel/micro-pauses) into one
+        # logical print window so host control does not thrash prestart/prestop.
+        gap_tolerance_s = max(0.0, float(self.print_gap_merge_s))
         first_move = seed_move
         last_move = seed_move
         in_window = False
@@ -225,7 +230,7 @@ class DrukMixPlannerProbe:
         if t_after is None:
             return None, None
 
-        gap_tolerance_s = 1e-6
+        gap_tolerance_s = max(0.0, float(self.print_gap_merge_s))
         for m in self._moves:
             if not self._is_print_move(m):
                 continue
