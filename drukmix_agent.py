@@ -284,19 +284,25 @@ def planner_semantic_should_run(cfg: Cfg, ks: KlipperState, pump_running_hint: b
     t_stop = ks.planner_time_to_print_stop_s
     active_print_window = t_stop is not None
 
-    if pump_running_hint:
-        if active_print_window:
-            if t_stop <= max(0.0, float(cfg.pump_stop_lookahead_s)):
-                return False, "prestop"
-            return True, "print"
+    # Active window semantics are planner-authoritative and must not depend
+    # on backend "running" reporting, which can lag or be unavailable.
+    if active_print_window:
+        if t_stop <= max(0.0, float(cfg.pump_stop_lookahead_s)):
+            return False, "prestop"
+        return True, "print"
 
-        # We are between print windows: keep spinning only for short gaps.
-        if t_start is not None and t_start <= max(0.0, float(cfg.pump_run_lookahead_s)):
-            return True, "run_hold_gap"
-        return False, "gap_wait"
-
+    # No active print window: rely on horizon timing for prestart.
     if t_start is not None and t_start <= max(0.0, float(cfg.pump_start_lookahead_s)):
-        return True, "prestart_or_print"
+        return True, "prestart"
+
+    # Between windows: optionally keep spinning only if already running and
+    # the next window is very close.
+    if (
+        pump_running_hint
+        and t_start is not None
+        and t_start <= max(0.0, float(cfg.pump_run_lookahead_s))
+    ):
+        return True, "run_hold_gap"
 
     return False, "waiting_for_prestart"
 
@@ -881,7 +887,7 @@ async def run_agent(cfg_path: str):
                     rev = out.rev
                     stop = out.stop
 
-                    if semantic_reason == "prestart_or_print" and not bool(st.running):
+                    if semantic_reason == "prestart":
                         target_pct = max(0.0, float(cfg.pump_prestart_pct))
                         rev = False
                         stop = target_pct <= 0.0
