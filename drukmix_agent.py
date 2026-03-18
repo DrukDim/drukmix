@@ -23,12 +23,11 @@ from backend.backend_pumptpl import PumpTplBackend
 
 
 PLANNER_FIELD_NAMES = [
+    "queue_tail_s",
     "print_window_active",
     "time_to_print_start_s",
     "time_to_print_stop_s",
-    "planned_start_velocity_mms",
-    "planned_start_velocity_is_zero",
-    "active_control_velocity_mms",
+    "control_velocity_mms",
 ]
 
 
@@ -57,7 +56,6 @@ class Cfg:
     min_print_mms: float
     min_flow_pct: float
     min_flow_hold_s: float
-    start_flow_floor_pct: float
     retract_deadband_mms: float
     retract_gain_pct: float
     pump_start_lookahead_s: float
@@ -92,9 +90,7 @@ class KlipperState:
     planner_print_window_active: bool = False
     planner_time_to_print_start_s: Optional[float] = None
     planner_time_to_print_stop_s: Optional[float] = None
-    planner_planned_start_velocity_mms: float = 0.0
-    planner_planned_start_velocity_is_zero: bool = True
-    planner_active_control_velocity_mms: float = 0.0
+    planner_control_velocity_mms: float = 0.0
     planner_last_update_t: float = 0.0
 
 
@@ -158,7 +154,6 @@ def load_config(path: str) -> Cfg:
         min_print_mms=_get_float(s, "min_print_mms", 0.0),
         min_flow_pct=_get_float(s, "min_flow_pct", 0.0),
         min_flow_hold_s=_get_float(s, "min_flow_hold_s", 0.0),
-        start_flow_floor_pct=_get_float(s, "start_flow_floor_pct", 0.0),
         retract_deadband_mms=_get_float(s, "retract_deadband_mms", 0.20),
         retract_gain_pct=_get_float(s, "retract_gain_pct", 100.0),
         pump_start_lookahead_s=_get_float(s, "pump_start_lookahead_s", 4.0),
@@ -257,18 +252,8 @@ def apply_status(ks: KlipperState, st: Dict[str, Any], now: float) -> None:
         if "time_to_print_stop_s" in pp:
             v = pp.get("time_to_print_stop_s")
             ks.planner_time_to_print_stop_s = None if v is None else _safe_float(v, 0.0)
-        if "planned_start_velocity_mms" in pp:
-            ks.planner_planned_start_velocity_mms = max(
-                0.0, _safe_float(pp.get("planned_start_velocity_mms"), 0.0)
-            )
-        if "planned_start_velocity_is_zero" in pp:
-            ks.planner_planned_start_velocity_is_zero = bool(
-                pp.get("planned_start_velocity_is_zero")
-            )
-        if "active_control_velocity_mms" in pp:
-            ks.planner_active_control_velocity_mms = max(
-                0.0, _safe_float(pp.get("active_control_velocity_mms"), 0.0)
-            )
+        if "control_velocity_mms" in pp:
+            ks.planner_control_velocity_mms = max(0.0, _safe_float(pp.get("control_velocity_mms"), 0.0))
         ks.planner_last_update_t = now
 
 
@@ -278,10 +263,8 @@ def planner_is_fresh(cfg: Cfg, ks: KlipperState, now: float) -> bool:
     return (now - ks.planner_last_update_t) <= max(0.1, float(cfg.planner_stale_timeout_s))
 
 
-def select_control_velocity(cfg: Cfg, ks: KlipperState, pump_running_hint: bool) -> float:
-    if pump_running_hint:
-        return max(0.0, float(ks.planner_active_control_velocity_mms))
-    return max(0.0, float(ks.planner_planned_start_velocity_mms))
+def select_control_velocity(cfg: Cfg, ks: KlipperState) -> float:
+    return max(0.0, float(ks.planner_control_velocity_mms))
 
 
 def planner_semantic_should_run(cfg: Cfg, ks: KlipperState, pump_running_hint: bool) -> tuple[bool, str]:
@@ -649,15 +632,14 @@ async def run_agent(cfg_path: str):
                         if params and isinstance(params[0], dict):
                             st0 = params[0]
                             apply_status(ks, st0, now)
-                            if cfg.planner_debug_log and "drukmix_probe" in st0:
-                                pp = st0["drukmix_probe"]
+                            if cfg.planner_debug_log and "drukmix_planner_probe" in st0:
+                                pp = st0["drukmix_planner_probe"]
                                 logging.info(
-                                    "drukmix agent probe update: queue_tail_s=%s t_start=%s t_stop=%s planned_start_v=%s active_v=%s",
+                                    "drukmix agent probe update: queue_tail_s=%s t_start=%s t_stop=%s control_velocity=%s",
                                     pp.get("queue_tail_s"),
                                     pp.get("time_to_print_start_s"),
                                     pp.get("time_to_print_stop_s"),
-                                    pp.get("planned_start_velocity_mms"),
-                                    pp.get("active_control_velocity_mms"),
+                                    pp.get("control_velocity_mms"),
                                 )
                         continue
 
@@ -668,7 +650,7 @@ async def run_agent(cfg_path: str):
                     method, params = rc
 
                     st_for_status = backend.poll_status()
-                    control_velocity_for_status = select_control_velocity(cfg, ks, bool(st_for_status.running))
+                    control_velocity_for_status = select_control_velocity(cfg, ks)
 
                     if method == "drukmix_stop":
                         fs.active = False
@@ -787,7 +769,7 @@ async def run_agent(cfg_path: str):
                 else:
                     last_fault_notify_key = None
 
-                control_velocity = select_control_velocity(cfg, ks, bool(st.running))
+                control_velocity = select_control_velocity(cfg, ks)
 
                 semantic_should_run_now = False
                 semantic_reason = "idle"
@@ -818,14 +800,6 @@ async def run_agent(cfg_path: str):
                     rev = False
                     stop = True
                 else:
-                    prestart_floor_pct = 0.0
-                    if (
-                        not bool(st.running)
-                        and semantic_reason == "prestart_or_print"
-                        and ks.planner_planned_start_velocity_is_zero
-                    ):
-                        prestart_floor_pct = max(0.0, float(cfg.start_flow_floor_pct))
-
                     out = core.compute(CoreInput(
                         printing=ks.planner_queue_tail_s > 0.0,
                         paused=False,
@@ -836,9 +810,6 @@ async def run_agent(cfg_path: str):
                     target_pct = out.target_pct
                     rev = out.rev
                     stop = out.stop
-
-                    if prestart_floor_pct > 0.0 and not stop:
-                        target_pct = max(float(target_pct), float(prestart_floor_pct))
 
                 if stop:
                     backend.stop()
