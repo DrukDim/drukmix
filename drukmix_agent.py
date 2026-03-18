@@ -41,8 +41,6 @@ PLANNER_FIELD_NAMES = [
     "print_window_active",
     "time_to_print_start_s",
     "time_to_print_stop_s",
-    "pump_run_command",
-    "pump_command_reason",
 ] + [name for name, _ in PLANNER_HORIZONS]
 
 
@@ -105,8 +103,6 @@ class KlipperState:
     planner_print_window_active: bool = False
     planner_time_to_print_start_s: Optional[float] = None
     planner_time_to_print_stop_s: Optional[float] = None
-    planner_pump_run_command: bool = False
-    planner_pump_command_reason: str = "idle"
     planner_last_update_t: float = 0.0
     planner_values: Dict[str, Optional[float]] = dataclasses.field(
         default_factory=lambda: {name: None for name, _ in PLANNER_HORIZONS}
@@ -271,10 +267,6 @@ def apply_status(ks: KlipperState, st: Dict[str, Any], now: float) -> None:
         if "time_to_print_stop_s" in pp:
             v = pp.get("time_to_print_stop_s")
             ks.planner_time_to_print_stop_s = None if v is None else _safe_float(v, 0.0)
-        if "pump_run_command" in pp:
-            ks.planner_pump_run_command = bool(pp.get("pump_run_command"))
-        if "pump_command_reason" in pp:
-            ks.planner_pump_command_reason = str(pp.get("pump_command_reason") or "idle")
         for name, _ in PLANNER_HORIZONS:
             if name in pp:
                 ks.planner_values[name] = None if pp.get(name) is None else _safe_float(pp.get(name), 0.0)
@@ -350,6 +342,24 @@ def pump_should_run(control_velocity: float, target_pct: float) -> bool:
     if target_pct > 0.5:
         return True
     return abs(float(control_velocity)) > 0.1
+
+
+def planner_semantic_should_run(cfg: Cfg, ks: KlipperState, pump_running_hint: bool) -> tuple[bool, str]:
+    if not ks.planner_print_window_active:
+        return False, "idle"
+
+    if pump_running_hint:
+        t_stop = ks.planner_time_to_print_stop_s
+        if t_stop is not None and t_stop <= max(0.0, float(cfg.pump_stop_lookahead_s)):
+            return False, "prestop"
+        return True, "print"
+
+    t_start = ks.planner_time_to_print_start_s
+    if t_start is not None and t_start <= max(0.0, float(cfg.pump_start_lookahead_s)):
+        return True, "prestart_or_print"
+
+    return False, "waiting_for_prestart"
+
 
 
 async def wait_moonraker_ready(log, ws_url: str, timeout_s: float = 30.0):
@@ -865,7 +875,14 @@ async def run_agent(cfg_path: str):
                     backend.set_auto_target_pct(target_pct, rev)
                     last_target_pct = target_pct
 
-                semantic_should_run_now = planner_valid and ks.planner_pump_run_command and ks.planner_print_window_active
+                semantic_should_run_now = False
+                semantic_reason = "idle"
+                if planner_valid:
+                    semantic_should_run_now, semantic_reason = planner_semantic_should_run(
+                        cfg,
+                        ks,
+                        bool(st.running) or last_target_pct > 0.5,
+                    )
                 should_run_now = semantic_should_run_now
 
                 if st.link_ok or (not should_run_now):
@@ -902,7 +919,7 @@ async def run_agent(cfg_path: str):
                         int(offline_by_time),
                         ks.planner_time_to_print_start_s,
                         ks.planner_time_to_print_stop_s,
-                        ks.planner_pump_command_reason,
+                        semantic_reason,
                     )
                     try:
                         await mr.pause_print()
@@ -954,8 +971,8 @@ async def run_agent(cfg_path: str):
                         int(ks.planner_print_window_active),
                         ks.planner_time_to_print_start_s,
                         ks.planner_time_to_print_stop_s,
-                        int(ks.planner_pump_run_command),
-                        ks.planner_pump_command_reason,
+                        int(should_run_now),
+                        semantic_reason,
                     )
 
                 await asyncio.sleep(1.0 / max(cfg.update_hz, 0.5))
