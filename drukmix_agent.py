@@ -28,7 +28,6 @@ PLANNER_FIELD_NAMES = [
     "time_to_print_start_s",
     "time_to_print_stop_s",
     "control_velocity_mms",
-    "start_control_velocity_mms",
 ]
 
 
@@ -92,7 +91,6 @@ class KlipperState:
     planner_time_to_print_start_s: Optional[float] = None
     planner_time_to_print_stop_s: Optional[float] = None
     planner_control_velocity_mms: float = 0.0
-    planner_start_control_velocity_mms: float = 0.0
     planner_last_update_t: float = 0.0
 
 
@@ -256,8 +254,6 @@ def apply_status(ks: KlipperState, st: Dict[str, Any], now: float) -> None:
             ks.planner_time_to_print_stop_s = None if v is None else _safe_float(v, 0.0)
         if "control_velocity_mms" in pp:
             ks.planner_control_velocity_mms = max(0.0, _safe_float(pp.get("control_velocity_mms"), 0.0))
-        if "start_control_velocity_mms" in pp:
-            ks.planner_start_control_velocity_mms = max(0.0, _safe_float(pp.get("start_control_velocity_mms"), 0.0))
         ks.planner_last_update_t = now
 
 
@@ -267,10 +263,8 @@ def planner_is_fresh(cfg: Cfg, ks: KlipperState, now: float) -> bool:
     return (now - ks.planner_last_update_t) <= max(0.1, float(cfg.planner_stale_timeout_s))
 
 
-def select_control_velocity(cfg: Cfg, ks: KlipperState, pump_running_hint: bool) -> float:
-    if pump_running_hint:
-        return max(0.0, float(ks.planner_control_velocity_mms))
-    return max(0.0, float(ks.planner_start_control_velocity_mms))
+def select_control_velocity(cfg: Cfg, ks: KlipperState) -> float:
+    return max(0.0, float(ks.planner_control_velocity_mms))
 
 
 def planner_semantic_should_run(cfg: Cfg, ks: KlipperState, pump_running_hint: bool) -> tuple[bool, str]:
@@ -641,12 +635,11 @@ async def run_agent(cfg_path: str):
                             if cfg.planner_debug_log and "drukmix_planner_probe" in st0:
                                 pp = st0["drukmix_planner_probe"]
                                 logging.info(
-                                    "drukmix agent probe update: queue_tail_s=%s t_start=%s t_stop=%s control_velocity=%s start_control_velocity=%s",
+                                    "drukmix agent probe update: queue_tail_s=%s t_start=%s t_stop=%s control_velocity=%s",
                                     pp.get("queue_tail_s"),
                                     pp.get("time_to_print_start_s"),
                                     pp.get("time_to_print_stop_s"),
                                     pp.get("control_velocity_mms"),
-                                    pp.get("start_control_velocity_mms"),
                                 )
                         continue
 
@@ -657,7 +650,7 @@ async def run_agent(cfg_path: str):
                     method, params = rc
 
                     st_for_status = backend.poll_status()
-                    control_velocity_for_status = select_control_velocity(cfg, ks, bool(st_for_status.running) or last_target_pct > 0.5)
+                    control_velocity_for_status = select_control_velocity(cfg, ks)
 
                     if method == "drukmix_stop":
                         fs.active = False
@@ -776,7 +769,7 @@ async def run_agent(cfg_path: str):
                 else:
                     last_fault_notify_key = None
 
-                control_velocity = select_control_velocity(cfg, ks, bool(st.running) or last_target_pct > 0.5)
+                control_velocity = select_control_velocity(cfg, ks)
 
                 semantic_should_run_now = False
                 semantic_reason = "idle"
