@@ -22,11 +22,10 @@ PRINTER_LOG_DIR="${PRINTER_LOG_DIR:-$USER_HOME/printer_data/logs}"
 
 CFG_TEMPLATE="$REPO_DIR/config_examples/drukmix.cfg"
 MACROS_TEMPLATE="$REPO_DIR/config_examples/drukmix_macros.cfg"
-PLANNER_TEMPLATE="$REPO_DIR/config_examples/drukmix_planner.cfg"
 
 CFG_DST="$PRINTER_CFG_DIR/drukmix.cfg"
 MACROS_DST="$PRINTER_CFG_DIR/drukmix_macros.cfg"
-PLANNER_DST="$PRINTER_CFG_DIR/drukmix_planner.cfg"
+LEGACY_PLANNER_DST="$PRINTER_CFG_DIR/drukmix_planner.cfg"
 
 PRINTER_CFG="$PRINTER_CFG_DIR/printer.cfg"
 SERVICE_TEMPLATE="$REPO_DIR/systemd/drukmix.service"
@@ -40,7 +39,6 @@ require_repo() {
   test -f "$REPO_DIR/drukmix_agent.py"
   test -f "$CFG_TEMPLATE"
   test -f "$MACROS_TEMPLATE"
-  test -f "$PLANNER_TEMPLATE"
   test -f "$SERVICE_TEMPLATE"
 }
 
@@ -114,14 +112,22 @@ install_macros_if_missing() {
   fi
 }
 
-install_planner_if_missing() {
-  install -m 0644 "$PLANNER_TEMPLATE" "$PLANNER_DST"
-  echo "Installed planner config: $PLANNER_DST"
-}
-
 remove_file_if_present() {
   local path="$1"
   rm -f "$path"
+}
+
+sync_repo_ff_only() {
+  if ! git -C "$REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    return 0
+  fi
+  if ! git -C "$REPO_DIR" remote get-url origin >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if ! git -C "$REPO_DIR" pull --ff-only; then
+    echo "WARNING: install could not fast-forward repo (dirty tree or divergence), continuing with current checkout"
+  fi
 }
 
 remove_include_line() {
@@ -207,7 +213,58 @@ PY
 ensure_required_includes() {
   ensure_include_once "[include drukmix_macros.cfg]"
   remove_include_line "[include drukmix_research.cfg]"
-  ensure_include_once "[include drukmix_planner.cfg]"
+  remove_include_line "[include drukmix_planner.cfg]"
+  ensure_planner_probe_section
+}
+
+ensure_planner_probe_section() {
+  PRINTER_CFG="$PRINTER_CFG" python3 - <<'PY'
+from pathlib import Path
+import os
+
+p = Path(os.environ["PRINTER_CFG"])
+s = p.read_text()
+
+begin = "# --- drukmix planner probe (managed): begin ---"
+end = "# --- drukmix planner probe (managed): end ---"
+block = """# --- drukmix planner probe (managed): begin ---
+[drukmix_planner_probe]
+extruder = extruder
+debug_enabled = False
+debug_every_n_moves = 200
+print_velocity_epsilon = 0.001
+# --- drukmix planner probe (managed): end ---"""
+
+if begin in s and end in s:
+    a = s.index(begin)
+    b = s.index(end) + len(end)
+    s = s[:a].rstrip("\n") + "\n\n" + block + "\n"
+elif "[drukmix_planner_probe]" not in s:
+    s = s.rstrip("\n") + "\n\n" + block + "\n"
+
+p.write_text(s)
+print(f"normalized {p} with managed [drukmix_planner_probe] section")
+PY
+}
+
+remove_managed_planner_probe_section() {
+  PRINTER_CFG="$PRINTER_CFG" python3 - <<'PY'
+from pathlib import Path
+import os
+
+p = Path(os.environ["PRINTER_CFG"])
+s = p.read_text()
+
+begin = "# --- drukmix planner probe (managed): begin ---"
+end = "# --- drukmix planner probe (managed): end ---"
+
+if begin in s and end in s:
+    a = s.index(begin)
+    b = s.index(end) + len(end)
+    s = (s[:a] + s[b:]).strip("\n") + "\n"
+    p.write_text(s)
+    print(f"normalized {p} without managed [drukmix_planner_probe] section")
+PY
 }
 
 install_service() {
@@ -303,12 +360,13 @@ bridge_status() {
 do_install() {
   require_repo
   require_paths
+  sync_repo_ff_only
   ensure_venv
   compile_check
   install_cfg_if_missing
   install_macros_if_missing
-  install_planner_if_missing
   remove_file_if_present "$PRINTER_CFG_DIR/drukmix_research.cfg"
+  remove_file_if_present "$LEGACY_PLANNER_DST"
   patch_cfg_if_needed
   ensure_required_includes
   install_service
@@ -336,8 +394,8 @@ do_update() {
   git -C "$REPO_DIR" pull --ff-only
   ensure_venv
   compile_check
-  install_planner_if_missing
   remove_file_if_present "$PRINTER_CFG_DIR/drukmix_research.cfg"
+  remove_file_if_present "$LEGACY_PLANNER_DST"
   patch_cfg_if_needed
   ensure_required_includes
   install_service
@@ -361,13 +419,14 @@ do_purge() {
   sudo systemctl daemon-reload
 
   rm -f "$MACROS_DST"
-  rm -f "$PLANNER_DST"
+  rm -f "$LEGACY_PLANNER_DST"
   rm -f "$PRINTER_CFG_DIR/drukmix_research.cfg"
   rm -f "$KLIPPER_EXTRA_DST"
 
   remove_include_line "[include drukmix_macros.cfg]"
-  remove_include_line "[include drukmix_planner.cfg]"
   remove_include_line "[include drukmix_research.cfg]"
+  remove_include_line "[include drukmix_planner.cfg]"
+  remove_managed_planner_probe_section
 
   echo
   echo "Purge completed."
@@ -375,8 +434,8 @@ do_purge() {
   echo "Kept venv: $REPO_DIR/.venv"
   echo "Kept config: $CFG_DST"
   echo "Removed live macros file: $MACROS_DST"
-  echo "Removed live planner config: $PLANNER_DST"
-  echo "Removed planner include lines from printer.cfg"
+  echo "Removed legacy planner config file: $LEGACY_PLANNER_DST"
+  echo "Removed managed planner-probe section from printer.cfg"
 }
 
 do_restart() {
@@ -407,7 +466,7 @@ do_status() {
   echo "printer log dir: $PRINTER_LOG_DIR"
   echo "config: $CFG_DST"
   echo "macros: $MACROS_DST"
-  echo "planner config: $PLANNER_DST"
+  echo "legacy planner config: $LEGACY_PLANNER_DST"
   echo "service: $SERVICE_DST"
   echo "klipper dir: $KLIPPER_DIR"
   echo "planner klipper extra: $KLIPPER_EXTRA_DST"
@@ -449,7 +508,7 @@ do_doctor() {
   [[ -f "$CFG_DST" ]] && echo "config: ok ($CFG_DST)" || echo "config: missing ($CFG_DST)"
   [[ -f "$PRINTER_CFG" ]] && echo "printer.cfg: ok ($PRINTER_CFG)" || echo "printer.cfg: missing ($PRINTER_CFG)"
   [[ -f "$MACROS_DST" ]] && echo "macros: ok ($MACROS_DST)" || echo "macros: missing ($MACROS_DST)"
-  [[ -f "$PLANNER_DST" ]] && echo "planner config: ok ($PLANNER_DST)" || echo "planner config: missing ($PLANNER_DST)"
+  [[ -f "$LEGACY_PLANNER_DST" ]] && echo "legacy planner config: present ($LEGACY_PLANNER_DST)" || echo "legacy planner config: not used"
   [[ -f "$SERVICE_DST" ]] && echo "service file: ok ($SERVICE_DST)" || echo "service file: missing ($SERVICE_DST)"
   [[ -f "$KLIPPER_EXTRA_DST" ]] && echo "planner klipper extra: ok ($KLIPPER_EXTRA_DST)" || echo "planner klipper extra: missing ($KLIPPER_EXTRA_DST)"
 

@@ -33,12 +33,6 @@ class DrukMixPlannerProbe:
         self.print_velocity_epsilon = config.getfloat(
             'print_velocity_epsilon', 0.001, minval=0.0
         )
-        self.pump_start_lookahead_s = config.getfloat(
-            'pump_start_lookahead_s', 3.0, minval=0.0
-        )
-        self.pump_stop_lookahead_s = config.getfloat(
-            'pump_stop_lookahead_s', 3.0, minval=0.0
-        )
 
         self.status = {
             'available': False,
@@ -265,7 +259,6 @@ class DrukMixPlannerProbe:
             elif (
                 next_window_start is not None
                 and time_to_print_start_s is not None
-                and time_to_print_start_s <= self.pump_start_lookahead_s
             ):
                 sample_t = min(
                     next_window_start['end_time'],

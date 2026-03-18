@@ -120,6 +120,11 @@ Current production planner contract is intentionally compact:
 - `time_to_print_stop_s`
 - `control_velocity_mms`
 
+Current config ownership model:
+- lookahead/policy values (`pump_start_lookahead_s`, `pump_run_lookahead_s`, `pump_stop_lookahead_s`) are owned by `[drukmix]` in `drukmix.cfg`;
+- Klipper planner-probe section is managed directly inside `printer.cfg` by the install/update helper;
+- separate `drukmix_planner.cfg` is legacy and is no longer the canonical source of planner policy.
+
 Research-style multi-horizon planner fields such as `planned_v_now` ... `planned_v_15000ms` are not intended to remain in the production control path.
 
 Current deployment-stage expectation:
@@ -133,7 +138,6 @@ This direction has been validated sufficiently to justify architectural migratio
 Relevant files:
 - `klipper_extra/drukmix_planner_probe.py`
 - `docs/research/planner_feedforward.md`
-- `config_examples/drukmix_planner.cfg`
 
 ## Workflow
 
