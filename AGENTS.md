@@ -82,6 +82,7 @@ When restructuring documentation:
 - Only then shorten `README.md` into a cleaner entrypoint.
 - Keep README aligned with actual deployed behavior and actual architecture.
 - Keep open defect/checklist items stable until explicitly verified as fixed.
+- Do not reintroduce a separate `drukmix_planner.cfg` as a settings source unless there is an explicit verified request to restore that file.
 
 ## Expected future document split
 

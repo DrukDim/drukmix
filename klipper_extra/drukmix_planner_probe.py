@@ -237,6 +237,10 @@ class DrukMixPlannerProbe:
             return False
         if m.get('axis_r', 0.0) <= 0.0:
             return False
+        eps = max(0.0, float(self.print_velocity_epsilon))
+        vmax = max(abs(float(m.get('start_v', 0.0))), abs(float(m.get('cruise_v', 0.0))))
+        if vmax <= eps:
+            return False
         return True
 
     def _first_print_move_after(self, est):
@@ -406,12 +410,19 @@ class DrukMixPlannerProbe:
 
         first_print = self._first_print_move_after(est)
         next_window_start, next_window_end = self._print_window_from_move(first_print)
+        next_window_source = 'none'
+        if next_window_start is not None:
+            next_window_source = 'committed'
         current_window_start, current_window_end = self._print_window_from_move(active_print)
 
         if current_window_end is not None:
             next_window_start, next_window_end = self._next_print_window_after(
                 current_window_end['end_time']
             )
+            if next_window_start is not None:
+                next_window_source = 'committed'
+            else:
+                next_window_source = 'none'
 
         pending_start, pending_end, pending_tail = self._pending_lookahead_print_window(est)
         if pending_tail is not None:
@@ -426,6 +437,7 @@ class DrukMixPlannerProbe:
                 or pending_start['start_time'] < next_window_start['start_time']
             ):
                 next_window_start, next_window_end = pending_start, pending_end
+                next_window_source = 'pending'
 
         if est is not None and queue_end is not None:
             queue_tail_s = max(0.0, float(queue_end) - float(est))
@@ -469,6 +481,7 @@ class DrukMixPlannerProbe:
             'time_to_print_start_s': time_to_print_start_s,
             'time_to_print_stop_s': time_to_print_stop_s,
             'control_velocity_mms': control_velocity_mms,
+            'time_to_print_start_source': next_window_source,
         }
 
         self.status.update(out)
@@ -477,7 +490,7 @@ class DrukMixPlannerProbe:
             first_t = self._moves[0]['start_time'] if self._moves else None
             last_t = self._moves[-1]['end_time'] if self._moves else None
             logging.info(
-                "drukmix_planner_probe status: est=%s moves=%d first=%s last=%s tail=%s active=%s next_start=%s current_stop=%s control_velocity=%s",
+                "drukmix_planner_probe status: est=%s moves=%d first=%s last=%s tail=%s active=%s next_start=%s next_source=%s current_stop=%s control_velocity=%s",
                 est,
                 len(self._moves),
                 first_t,
@@ -485,6 +498,7 @@ class DrukMixPlannerProbe:
                 queue_tail_s,
                 active_print['start_time'] if active_print is not None else None,
                 time_to_print_start_s,
+                next_window_source,
                 time_to_print_stop_s,
                 control_velocity_mms,
             )

@@ -73,14 +73,10 @@ class Cfg:
     ui_notify: bool
     planner_debug_log: bool
     backend_debug_log: bool
-
-    bridge_offline_timeout_s: float
     pump_offline_timeout_s: float
 
     log_file: str
     log_level: str
-
-    flush_confirm: bool
     cfg_reload_s: float
     cfg_path: str = ""
 
@@ -174,21 +170,21 @@ def load_config(path: str) -> Cfg:
         planner_debug_log=get_bool("planner_debug_log", False),
         backend_debug_log=get_bool("backend_debug_log", False),
 
-        bridge_offline_timeout_s=_get_float(s, "bridge_offline_timeout_s", 1.0),
         pump_offline_timeout_s=_get_float(s, "pump_offline_timeout_s", 1.2),
 
         log_file=_get_str(s, "log_file", os.path.expanduser("~/printer_data/logs/drukmix.log")),
         log_level=_get_str(s, "log_level", "info").lower(),
 
-        flush_confirm=get_bool("flush_confirm", False),
         cfg_reload_s=_get_float(s, "cfg_reload_s", 2.0),
         cfg_path=path,
     )
 
 
-def setup_logger(log_file: str) -> logging.Logger:
+def setup_logger(log_file: str, log_level: str = "info") -> logging.Logger:
     lg = logging.getLogger("drukmix")
-    lg.setLevel(logging.INFO)
+    level_name = str(log_level or "info").strip().upper()
+    level = getattr(logging, level_name, logging.INFO)
+    lg.setLevel(level)
     lg.handlers.clear()
 
     os.makedirs(os.path.dirname(log_file), exist_ok=True)
@@ -196,10 +192,12 @@ def setup_logger(log_file: str) -> logging.Logger:
     fh = RotatingFileHandler(log_file, maxBytes=5_000_000, backupCount=5)
     fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
     fh.setFormatter(fmt)
+    fh.setLevel(level)
     lg.addHandler(fh)
 
     sh = logging.StreamHandler()
     sh.setFormatter(fmt)
+    sh.setLevel(level)
     lg.addHandler(sh)
     return lg
 
@@ -524,7 +522,7 @@ async def run_agent(cfg_path: str):
     if not cfg.enabled:
         return
 
-    log = setup_logger(cfg.log_file)
+    log = setup_logger(cfg.log_file, cfg.log_level)
 
     lock_path = os.path.expanduser("~/printer_data/logs/drukmix.lock")
     os.makedirs(os.path.dirname(lock_path), exist_ok=True)

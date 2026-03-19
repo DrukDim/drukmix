@@ -25,7 +25,6 @@ MACROS_TEMPLATE="$REPO_DIR/config_examples/drukmix_macros.cfg"
 
 CFG_DST="$PRINTER_CFG_DIR/drukmix.cfg"
 MACROS_DST="$PRINTER_CFG_DIR/drukmix_macros.cfg"
-LEGACY_PLANNER_DST="$PRINTER_CFG_DIR/drukmix_planner.cfg"
 
 PRINTER_CFG="$PRINTER_CFG_DIR/printer.cfg"
 SERVICE_TEMPLATE="$REPO_DIR/systemd/drukmix.service"
@@ -218,22 +217,48 @@ ensure_required_includes() {
 }
 
 ensure_planner_probe_section() {
-  PRINTER_CFG="$PRINTER_CFG" python3 - <<'PY'
+  PRINTER_CFG="$PRINTER_CFG" CFG_DST="$CFG_DST" python3 - <<'PY'
 from pathlib import Path
 import os
 import re
+import configparser
 
 p = Path(os.environ["PRINTER_CFG"])
 s = p.read_text()
 
+cfg_dst = Path(os.environ.get("CFG_DST", ""))
+host_buffer_target_s = 4.0
+print_velocity_epsilon = 0.001
+print_gap_merge_s = 0.75
+if cfg_dst.exists():
+  cp = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
+  try:
+    cp.read(cfg_dst)
+    if cp.has_section("drukmix"):
+      pump_start_lookahead_s = cp.getfloat("drukmix", "pump_start_lookahead_s", fallback=4.0)
+      host_buffer_target_s = cp.getfloat("drukmix", "planner_probe_host_buffer_target_s", fallback=0.0)
+      if host_buffer_target_s <= 0.0:
+        host_buffer_target_s = pump_start_lookahead_s
+      print_velocity_epsilon = cp.getfloat("drukmix", "planner_probe_print_velocity_epsilon", fallback=0.001)
+      print_gap_merge_s = cp.getfloat("drukmix", "planner_probe_print_gap_merge_s", fallback=0.75)
+  except Exception:
+    host_buffer_target_s = 4.0
+    print_velocity_epsilon = 0.001
+    print_gap_merge_s = 0.75
+host_buffer_target_s = max(0.0, min(30.0, float(host_buffer_target_s)))
+print_velocity_epsilon = max(0.0, min(0.1, float(print_velocity_epsilon)))
+print_gap_merge_s = max(0.0, min(30.0, float(print_gap_merge_s)))
+
 begin = "# --- drukmix planner probe (managed): begin ---"
 end = "# --- drukmix planner probe (managed): end ---"
-block = """# --- drukmix planner probe (managed): begin ---
+block = f"""# --- drukmix planner probe (managed): begin ---
 [drukmix_planner_probe]
 extruder = extruder
 debug_enabled = False
 debug_every_n_moves = 200
-print_velocity_epsilon = 0.001
+print_velocity_epsilon = {print_velocity_epsilon:.6f}
+print_gap_merge_s = {print_gap_merge_s:.3f}
+host_buffer_target_s = {host_buffer_target_s:.3f}
 # --- drukmix planner probe (managed): end ---"""
 
 # Remove any old managed block variant.
@@ -419,7 +444,7 @@ do_update() {
   ensure_venv
   compile_check
   remove_file_if_present "$PRINTER_CFG_DIR/drukmix_research.cfg"
-  remove_file_if_present "$LEGACY_PLANNER_DST"
+  remove_file_if_present "$PRINTER_CFG_DIR/drukmix_planner.cfg"
   patch_cfg_if_needed
   ensure_required_includes
   install_service
@@ -443,7 +468,7 @@ do_purge() {
   sudo systemctl daemon-reload
 
   rm -f "$MACROS_DST"
-  rm -f "$LEGACY_PLANNER_DST"
+  rm -f "$PRINTER_CFG_DIR/drukmix_planner.cfg"
   rm -f "$PRINTER_CFG_DIR/drukmix_research.cfg"
   rm -f "$KLIPPER_EXTRA_DST"
 
@@ -458,7 +483,6 @@ do_purge() {
   echo "Kept venv: $REPO_DIR/.venv"
   echo "Kept config: $CFG_DST"
   echo "Removed live macros file: $MACROS_DST"
-  echo "Removed legacy planner config file: $LEGACY_PLANNER_DST"
   echo "Removed managed planner-probe section from printer.cfg"
 }
 
@@ -490,7 +514,6 @@ do_status() {
   echo "printer log dir: $PRINTER_LOG_DIR"
   echo "config: $CFG_DST"
   echo "macros: $MACROS_DST"
-  echo "legacy planner config: $LEGACY_PLANNER_DST"
   echo "service: $SERVICE_DST"
   echo "klipper dir: $KLIPPER_DIR"
   echo "planner klipper extra: $KLIPPER_EXTRA_DST"
