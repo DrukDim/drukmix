@@ -25,6 +25,7 @@ MACROS_TEMPLATE="$REPO_DIR/config_examples/drukmix_macros.cfg"
 
 CFG_DST="$PRINTER_CFG_DIR/drukmix.cfg"
 MACROS_DST="$PRINTER_CFG_DIR/drukmix_macros.cfg"
+LEGACY_PLANNER_DST="$PRINTER_CFG_DIR/drukmix_planner.cfg"
 
 PRINTER_CFG="$PRINTER_CFG_DIR/printer.cfg"
 SERVICE_TEMPLATE="$REPO_DIR/systemd/drukmix.service"
