@@ -604,6 +604,9 @@ async def run_agent(cfg_path: str):
             last_fault_notify_key = None
             suppress_fault_until = 0.0
             pump_offline_since = None
+            pause_latched_offline = False
+            pause_latched_blocked_mode = False
+            pause_latched_fault = False
             last_target_pct = 0.0
             last_probe_poll_t = 0.0
             last_transition_key = None
@@ -791,7 +794,7 @@ async def run_agent(cfg_path: str):
                     if planner_valid and ks.planner_print_window_active:
                         backend.stop()
                         last_target_pct = 0.0
-                        if st.pause_print:
+                        if st.pause_print and (not pause_latched_fault):
                             log.warning(
                                 "DBG pause reason=fault fault=%d code=%d link_ok=%d mode=%s planner_valid=%d tail_s=%.3f",
                                 int(st.faulted),
@@ -805,6 +808,7 @@ async def run_agent(cfg_path: str):
                                 await mr.pause_print()
                             except Exception:
                                 pass
+                            pause_latched_fault = True
 
                     fault_key = (st.backend, st.fault_code, bool(st.link_ok))
                     if fault_key != last_fault_notify_key:
@@ -817,6 +821,7 @@ async def run_agent(cfg_path: str):
                         last_fault_notify_key = fault_key
                 else:
                     last_fault_notify_key = None
+                    pause_latched_fault = False
 
                 control_velocity = select_control_velocity(cfg, ks)
 
@@ -921,12 +926,14 @@ async def run_agent(cfg_path: str):
                 if pump_offline_since is not None:
                     offline_by_time = (now - pump_offline_since) >= max(0.0, cfg.pump_offline_timeout_s)
 
-                if (
+                offline_pause_condition = (
                     cfg.pause_on_pump_offline
                     and should_run_now
                     and (not st.link_ok)
                     and (offline_by_age or offline_by_time)
-                ):
+                )
+
+                if offline_pause_condition and (not pause_latched_offline):
                     log.warning(
                         "DBG pause reason=pump_offline planner_valid=%d tail_s=%.3f link_ok=%d age_ms=%s mode=%s ctrl_vel=%.3f target_pct=%.2f should_run=%d off_age=%d off_time=%d t_start=%s t_stop=%s cmd_reason=%s",
                         int(planner_valid),
@@ -948,8 +955,13 @@ async def run_agent(cfg_path: str):
                     except Exception:
                         pass
                     await maybe_respond(mr, cfg.ui_notify, "error", "DrukMix: pump offline")
+                    pause_latched_offline = True
+                elif not offline_pause_condition:
+                    pause_latched_offline = False
 
-                if cfg.pause_on_manual_mode and semantic_should_run_now and not auto_allowed:
+                blocked_mode_pause_condition = cfg.pause_on_manual_mode and semantic_should_run_now and not auto_allowed
+
+                if blocked_mode_pause_condition and (not pause_latched_blocked_mode):
                     log.warning(
                         "DBG pause reason=blocked_mode planner_valid=%d tail_s=%.3f mode=%s link_ok=%d ctrl_vel=%.3f target_pct=%.2f mode_reason=%s",
                         int(planner_valid),
@@ -965,6 +977,9 @@ async def run_agent(cfg_path: str):
                     except Exception:
                         pass
                     await maybe_respond(mr, cfg.ui_notify, "error", f"DrukMix: blocked mode {st.control_mode}")
+                    pause_latched_blocked_mode = True
+                elif not blocked_mode_pause_condition:
+                    pause_latched_blocked_mode = False
 
                 if now - last_log_t >= max(0.2, cfg.log_period_s):
                     last_log_t = now
