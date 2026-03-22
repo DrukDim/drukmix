@@ -66,9 +66,13 @@ DrukMix currently assumes a deployment environment built around:
 Current normal install flow expects a host environment where the helper can:
 - create a Python virtual environment;
 - install Python dependencies;
+- install a global `drukmix` command launcher;
 - install / reload a systemd unit;
 - install or keep live config files under `~/printer_data/config`;
 - install bridge udev rule, reload udev rules, and wait for the bridge alias to appear.
+
+After a successful install or update, the helper installs a global launcher at `/usr/local/bin/drukmix`
+that forwards to the repository checkout's `tools/drukmix` script.
 
 ## Host prerequisites
 

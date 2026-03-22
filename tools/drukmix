@@ -30,6 +30,7 @@ LEGACY_PLANNER_DST="$PRINTER_CFG_DIR/drukmix_planner.cfg"
 PRINTER_CFG="$PRINTER_CFG_DIR/printer.cfg"
 SERVICE_TEMPLATE="$REPO_DIR/systemd/drukmix.service"
 SERVICE_DST="/etc/systemd/system/drukmix.service"
+CLI_DST="${CLI_DST:-/usr/local/bin/drukmix}"
 
 KLIPPER_DIR="${KLIPPER_DIR:-$USER_HOME/klipper}"
 KLIPPER_EXTRA_SRC="$REPO_DIR/klipper_extra/drukmix_planner_probe.py"
@@ -329,6 +330,22 @@ install_service() {
   sudo systemctl enable drukmix.service >/dev/null 2>&1 || true
 }
 
+install_cli_launcher() {
+  local rendered
+  rendered="$(mktemp)"
+
+  cat > "$rendered" <<EOF
+#!/usr/bin/env bash
+exec "$REPO_DIR/tools/drukmix" "\$@"
+EOF
+
+  sudo mkdir -p "$(dirname "$CLI_DST")"
+  sudo install -m 0755 "$rendered" "$CLI_DST"
+  rm -f "$rendered"
+
+  echo "installed command launcher: $CLI_DST -> $REPO_DIR/tools/drukmix"
+}
+
 restart_service() {
   sudo systemctl restart drukmix.service
 }
@@ -446,6 +463,7 @@ do_install() {
   remove_file_if_present "$LEGACY_PLANNER_DST"
   patch_cfg_if_needed
   ensure_required_includes
+  install_cli_launcher
   install_service
   install_bridge_udev_rule
   reload_udev_rules
@@ -475,6 +493,7 @@ do_update() {
   remove_file_if_present "$PRINTER_CFG_DIR/drukmix_planner.cfg"
   patch_cfg_if_needed
   ensure_required_includes
+  install_cli_launcher
   install_service
   install_bridge_udev_rule
   reload_udev_rules
@@ -493,6 +512,7 @@ do_purge() {
   sudo systemctl stop drukmix.service >/dev/null 2>&1 || true
   sudo systemctl disable drukmix.service >/dev/null 2>&1 || true
   sudo rm -f "$SERVICE_DST"
+  sudo rm -f "$CLI_DST"
   sudo systemctl daemon-reload
 
   rm -f "$MACROS_DST"
@@ -544,6 +564,7 @@ do_status() {
   echo "config: $CFG_DST"
   echo "macros: $MACROS_DST"
   echo "service: $SERVICE_DST"
+  echo "command launcher: $CLI_DST"
   echo "klipper dir: $KLIPPER_DIR"
   echo "planner klipper extra: $KLIPPER_EXTRA_DST"
 
@@ -586,6 +607,7 @@ do_doctor() {
   [[ -f "$MACROS_DST" ]] && echo "macros: ok ($MACROS_DST)" || echo "macros: missing ($MACROS_DST)"
   [[ -f "$LEGACY_PLANNER_DST" ]] && echo "legacy planner config: present ($LEGACY_PLANNER_DST)" || echo "legacy planner config: not used"
   [[ -f "$SERVICE_DST" ]] && echo "service file: ok ($SERVICE_DST)" || echo "service file: missing ($SERVICE_DST)"
+  [[ -x "$CLI_DST" ]] && echo "command launcher: ok ($CLI_DST)" || echo "command launcher: missing ($CLI_DST)"
   [[ -f "$KLIPPER_EXTRA_DST" ]] && echo "planner klipper extra: ok ($KLIPPER_EXTRA_DST)" || echo "planner klipper extra: missing ($KLIPPER_EXTRA_DST)"
   [[ -f "$KLIPPER_VEXT_DST" ]] && echo "virtual extruder extra: ok ($KLIPPER_VEXT_DST)" || echo "virtual extruder extra: not installed (for lab/VM use only)"
 
