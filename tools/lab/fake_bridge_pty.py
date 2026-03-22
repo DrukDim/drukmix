@@ -64,6 +64,8 @@ class FakeBridgePTY:
         os.set_blocking(self.master_fd, False)
         self.rxbuf = bytearray()
         self.last_tick = time.monotonic()
+        self.last_heartbeat = time.monotonic()
+        self.heartbeat_interval_s = 0.5  # Send status every 500ms
         self.log_fp = open(args.log_jsonl, "a", encoding="utf-8") if args.log_jsonl else None
 
         if self.args.write_tty_path:
@@ -170,8 +172,17 @@ class FakeBridgePTY:
         self._log("start", slave_path=self.slave_path, model=asdict(self.model))
 
         try:
+            heartbeat_seq = 0
             while True:
                 self._tick()
+                
+                # Send heartbeat status ping if no activity
+                now = time.monotonic()
+                if (now - self.last_heartbeat) >= self.heartbeat_interval_s:
+                    heartbeat_seq = (heartbeat_seq + 1) & 0xFFFF
+                    self._send_status(heartbeat_seq)
+                    self.last_heartbeat = now
+                    self._log("heartbeat", seq=heartbeat_seq)
 
                 rlist, _, _ = select.select([self.master_fd], [], [], 0.05)
                 if not rlist:
