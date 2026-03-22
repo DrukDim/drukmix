@@ -30,6 +30,8 @@ PLANNER_FIELD_NAMES = [
     "control_velocity_mms",
 ]
 
+PRINT_STATE_FIELD_NAMES = ["state"]
+
 
 def clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
@@ -90,6 +92,7 @@ class KlipperState:
     planner_time_to_print_stop_s: Optional[float] = None
     planner_control_velocity_mms: float = 0.0
     planner_last_update_t: float = 0.0
+    print_state: str = "standby"
 
 
 @dataclasses.dataclass
@@ -237,6 +240,11 @@ def _safe_float(v: Any, default: float = 0.0) -> float:
 
 
 def apply_status(ks: KlipperState, st: Dict[str, Any], now: float) -> None:
+    if "print_stats" in st and isinstance(st["print_stats"], dict):
+        state = st["print_stats"].get("state")
+        if isinstance(state, str) and state:
+            ks.print_state = state.lower()
+
     if "gcode_move" in st and "extrude_factor" in st["gcode_move"]:
         try:
             ks.extrude_factor = float(st["gcode_move"]["extrude_factor"])
@@ -585,6 +593,7 @@ async def run_agent(cfg_path: str):
             try:
                 sub = await mr.call("printer.objects.query", {
                     "objects": {
+                        "print_stats": PRINT_STATE_FIELD_NAMES,
                         "gcode_move": ["extrude_factor"],
                         "drukmix_planner_probe": PLANNER_FIELD_NAMES,
                     }
@@ -610,6 +619,7 @@ async def run_agent(cfg_path: str):
             last_target_pct = 0.0
             last_probe_poll_t = 0.0
             last_transition_key = None
+            remote_stop_latched = False
 
             while True:
                 now = time.monotonic()
@@ -619,6 +629,7 @@ async def run_agent(cfg_path: str):
                     try:
                         sub = await mr.call("printer.objects.query", {
                             "objects": {
+                                "print_stats": PRINT_STATE_FIELD_NAMES,
                                 "gcode_move": ["extrude_factor"],
                                 "drukmix_planner_probe": PLANNER_FIELD_NAMES,
                             }
@@ -705,16 +716,24 @@ async def run_agent(cfg_path: str):
                         continue
 
                     if method == "drukmix_stop":
+                        if ks.print_state != "paused":
+                            remote_stop_latched = False
+
+                        if remote_stop_latched:
+                            continue
+
                         fs.active = False
                         fs.pct = 0.0
                         fs.until_t = 0.0
                         backend.stop()
                         last_target_pct = 0.0
-                        try:
-                            await mr.pause_print()
-                        except Exception:
-                            pass
+                        if ks.print_state != "paused":
+                            try:
+                                await mr.pause_print()
+                            except Exception:
+                                pass
                         await maybe_respond(mr, cfg.ui_notify, "error", "DrukMix: STOP")
+                        remote_stop_latched = True
                         continue
 
                     if method == "drukmix_flush":
