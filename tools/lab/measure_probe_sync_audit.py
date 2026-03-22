@@ -182,6 +182,95 @@ def nearest_flow(events: list[FlowEvent], ts: float) -> Optional[FlowEvent]:
     return min(events, key=lambda e: abs(e.ts_mono - ts))
 
 
+def nearest_sample(samples: list[Sample], ts: float) -> Optional[Sample]:
+    if not samples:
+        return None
+    return min(samples, key=lambda s: abs(s.ts_mono - ts))
+
+
+def semantic_segments(
+    samples: list[Sample],
+    prestart_s: float,
+    prestop_s: float,
+) -> dict[str, list[dict[str, Any]]]:
+    out: dict[str, list[dict[str, Any]]] = {
+        "prestart": [],
+        "print": [],
+        "prestop": [],
+        "travel_gap": [],
+        "other": [],
+    }
+
+    if not samples:
+        return out
+
+    start_index = 0
+    prev_sem = semantic_of(samples[0], prestart_s=prestart_s, prestop_s=prestop_s)
+    for idx in range(1, len(samples) + 1):
+        cur_sem = None
+        if idx < len(samples):
+            cur_sem = semantic_of(samples[idx], prestart_s=prestart_s, prestop_s=prestop_s)
+        if idx == len(samples) or cur_sem != prev_sem:
+            first = samples[start_index]
+            last = samples[idx - 1]
+            out.setdefault(prev_sem, []).append(
+                {
+                    "start_idx": start_index,
+                    "end_idx": idx - 1,
+                    "samples": idx - start_index,
+                    "start_ts_mono": first.ts_mono,
+                    "end_ts_mono": last.ts_mono,
+                    "start_print_duration": first.print_duration,
+                    "end_print_duration": last.print_duration,
+                    "start_file_position": first.file_position,
+                    "end_file_position": last.file_position,
+                    "start_t_start": first.time_to_print_start_s,
+                    "end_t_start": last.time_to_print_start_s,
+                    "start_t_stop": first.time_to_print_stop_s,
+                    "end_t_stop": last.time_to_print_stop_s,
+                    "start_velocity_mms": first.control_velocity_mms,
+                    "end_velocity_mms": last.control_velocity_mms,
+                }
+            )
+            if idx < len(samples):
+                start_index = idx
+                prev_sem = cur_sem
+
+    return out
+
+
+def flow_edges(events: list[FlowEvent], samples: list[Sample]) -> dict[str, list[dict[str, Any]]]:
+    starts: list[dict[str, Any]] = []
+    stops: list[dict[str, Any]] = []
+    prev_target = 0
+
+    for ev in events:
+        cur_target = int(ev.target_milli_lpm)
+        edge_kind = None
+        if prev_target <= 0 and cur_target > 0:
+            edge_kind = "start"
+        elif prev_target > 0 and cur_target <= 0:
+            edge_kind = "stop"
+        prev_target = cur_target
+        if edge_kind is None:
+            continue
+
+        near = nearest_sample(samples, ev.ts_mono)
+        row = {
+            "ts_mono": ev.ts_mono,
+            "target_milli_lpm": ev.target_milli_lpm,
+            "rev": ev.rev,
+            "mode": ev.mode,
+            "nearest_sample": None if near is None else asdict(near),
+        }
+        if edge_kind == "start":
+            starts.append(row)
+        else:
+            stops.append(row)
+
+    return {"start": starts, "stop": stops}
+
+
 def to_plain(obj: Any) -> Any:
     if isinstance(obj, dict):
         return {k: to_plain(v) for k, v in obj.items()}
@@ -288,6 +377,8 @@ def main() -> int:
     prestart_points = [x for x in transition_points if x["to_semantic"] == "prestart"]
     print_points = [x for x in transition_points if x["to_semantic"] == "print"]
     prestop_points = [x for x in transition_points if x["to_semantic"] == "prestop"]
+    segments = semantic_segments(samples, prestart_s=prestart_s, prestop_s=prestop_s)
+    edges = flow_edges(bridge_events, samples)
 
     # Correlation and on/off consistency during print windows.
     active_pairs: list[tuple[float, float]] = []
@@ -355,6 +446,17 @@ def main() -> int:
             "print": len(print_points),
             "prestop": len(prestop_points),
         },
+        "segments": {
+            "prestart": len(segments["prestart"]),
+            "print": len(segments["print"]),
+            "prestop": len(segments["prestop"]),
+            "travel_gap": len(segments["travel_gap"]),
+            "other": len(segments["other"]),
+        },
+        "flow_edges": {
+            "start": len(edges["start"]),
+            "stop": len(edges["stop"]),
+        },
         "sync": {
             "corr_velocity_vs_target_active_window": corr,
             "pump_on_ratio_when_velocity_positive": ratio_vel_pos,
@@ -387,6 +489,13 @@ def main() -> int:
                 }
                 for p in prestop_points[:100]
             ],
+            "prestart_segments": segments["prestart"][:20],
+            "print_segments": segments["print"][:20],
+            "prestop_segments": segments["prestop"][:20],
+            "travel_gap_segments": segments["travel_gap"][:20],
+            "other_segments": segments["other"][:20],
+            "flow_start_edges": edges["start"][:20],
+            "flow_stop_edges": edges["stop"][:20],
             "drukmix_transition_lines": semantic_log_lines[-200:],
             "last_bridge_set_flow": bridge_events[-80:],
         },
