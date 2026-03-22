@@ -300,7 +300,17 @@ PY
 }
 
 install_service() {
-  sudo install -m 0644 "$SERVICE_TEMPLATE" "$SERVICE_DST"
+  local rendered
+  rendered="$(mktemp)"
+
+  # Render unit for current host user/home to avoid ad hoc printer-side edits.
+  sed \
+    -e "s|^User=.*$|User=${USER_NAME}|" \
+    -e "s|/home/drukos|${USER_HOME}|g" \
+    "$SERVICE_TEMPLATE" > "$rendered"
+
+  sudo install -m 0644 "$rendered" "$SERVICE_DST"
+  rm -f "$rendered"
   sudo systemctl daemon-reload
   sudo systemctl enable drukmix.service >/dev/null 2>&1 || true
 }
