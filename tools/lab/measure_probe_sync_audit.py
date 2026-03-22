@@ -109,6 +109,18 @@ def moonraker_query(base: str) -> Sample:
     )
 
 
+def moonraker_post(base: str, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base.rstrip('/')}{path}",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
 def read_new_log(path: Path, start_size: int) -> str:
     if not path.exists():
         return ""
@@ -187,6 +199,8 @@ def main() -> int:
     ap.add_argument("--poll-s", type=float, default=0.10)
     ap.add_argument("--prestart-lookahead-s", type=float, default=4.0)
     ap.add_argument("--prestop-lookahead-s", type=float, default=3.0)
+    ap.add_argument("--start-print-file", default="")
+    ap.add_argument("--cancel-at-end", action="store_true")
     ap.add_argument("--out-dir", default="")
     args = ap.parse_args()
 
@@ -206,6 +220,18 @@ def main() -> int:
     start_mono = time.monotonic()
     deadline = start_mono + duration_s
 
+    if args.start_print_file:
+        try:
+            moonraker_post(args.moonraker_http, "/printer/print/cancel", {})
+        except Exception:
+            pass
+        time.sleep(1.5)
+        moonraker_post(
+            args.moonraker_http,
+            "/printer/print/start",
+            {"filename": args.start_print_file},
+        )
+
     samples: list[Sample] = []
     query_errors = 0
 
@@ -221,6 +247,12 @@ def main() -> int:
 
     # Small flush delay so bridge and logs catch final writes.
     time.sleep(1.0)
+
+    if args.cancel_at_end:
+        try:
+            moonraker_post(args.moonraker_http, "/printer/print/cancel", {})
+        except Exception:
+            pass
 
     bridge_events = parse_bridge_events(bridge_path, start_mono)
     drukmix_new = read_new_log(drukmix_log_path, log_start_size)
