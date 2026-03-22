@@ -35,6 +35,12 @@ KLIPPER_DIR="${KLIPPER_DIR:-$USER_HOME/klipper}"
 KLIPPER_EXTRA_SRC="$REPO_DIR/klipper_extra/drukmix_planner_probe.py"
 KLIPPER_EXTRA_DST="$KLIPPER_DIR/klippy/extras/drukmix_planner_probe.py"
 
+LAB_FAKE_BRIDGE_SCRIPT="$REPO_DIR/tools/lab/fake_bridge_pty.py"
+LAB_FAKE_BRIDGE_TTY_FILE="${LAB_FAKE_BRIDGE_TTY_FILE:-/tmp/drukmix_fake_bridge.tty}"
+LAB_FAKE_BRIDGE_LOG_FILE="${LAB_FAKE_BRIDGE_LOG_FILE:-/tmp/drukmix_fake_bridge.jsonl}"
+LAB_FAKE_BRIDGE_OUT_FILE="${LAB_FAKE_BRIDGE_OUT_FILE:-/tmp/drukmix_fake_bridge.out}"
+LAB_FAKE_BRIDGE_PID_FILE="${LAB_FAKE_BRIDGE_PID_FILE:-/tmp/drukmix_fake_bridge.pid}"
+
 require_repo() {
   test -f "$REPO_DIR/drukmix_agent.py"
   test -f "$CFG_TEMPLATE"
@@ -586,9 +592,164 @@ do_doctor() {
   echo
 }
 
+fake_bridge_pid() {
+  if [[ -f "$LAB_FAKE_BRIDGE_PID_FILE" ]]; then
+    cat "$LAB_FAKE_BRIDGE_PID_FILE" 2>/dev/null || true
+  fi
+}
+
+fake_bridge_running() {
+  local pid
+  pid="$(fake_bridge_pid)"
+  [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1
+}
+
+do_lab_fake_bridge_start() {
+  require_repo
+  ensure_venv
+
+  if [[ ! -f "$LAB_FAKE_BRIDGE_SCRIPT" ]]; then
+    echo "fake bridge script missing: $LAB_FAKE_BRIDGE_SCRIPT"
+    exit 2
+  fi
+
+  if fake_bridge_running; then
+    echo "fake bridge already running (pid=$(fake_bridge_pid))"
+    do_lab_fake_bridge_status
+    return 0
+  fi
+
+  nohup "$REPO_DIR/.venv/bin/python" "$LAB_FAKE_BRIDGE_SCRIPT" \
+    --write-tty-path "$LAB_FAKE_BRIDGE_TTY_FILE" \
+    --log-jsonl "$LAB_FAKE_BRIDGE_LOG_FILE" \
+    >"$LAB_FAKE_BRIDGE_OUT_FILE" 2>&1 < /dev/null &
+
+  local pid
+  pid="$!"
+  echo "$pid" > "$LAB_FAKE_BRIDGE_PID_FILE"
+
+  local n=0
+  while [[ $n -lt 40 ]]; do
+    if [[ -s "$LAB_FAKE_BRIDGE_TTY_FILE" ]]; then
+      break
+    fi
+    sleep 0.1
+    n=$((n+1))
+  done
+
+  echo "fake bridge started (pid=$pid)"
+  do_lab_fake_bridge_status
+}
+
+do_lab_fake_bridge_stop() {
+  local pid
+  pid="$(fake_bridge_pid)"
+  if [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1; then
+    kill "$pid" >/dev/null 2>&1 || true
+    sleep 0.2
+    if kill -0 "$pid" >/dev/null 2>&1; then
+      kill -9 "$pid" >/dev/null 2>&1 || true
+    fi
+    echo "stopped fake bridge pid=$pid"
+  else
+    echo "fake bridge not running"
+  fi
+  rm -f "$LAB_FAKE_BRIDGE_PID_FILE"
+}
+
+do_lab_fake_bridge_status() {
+  if fake_bridge_running; then
+    echo "fake bridge: running (pid=$(fake_bridge_pid))"
+  else
+    echo "fake bridge: stopped"
+  fi
+
+  if [[ -s "$LAB_FAKE_BRIDGE_TTY_FILE" ]]; then
+    echo "tty file: $LAB_FAKE_BRIDGE_TTY_FILE"
+    echo "tty path: $(cat "$LAB_FAKE_BRIDGE_TTY_FILE")"
+  else
+    echo "tty file: missing ($LAB_FAKE_BRIDGE_TTY_FILE)"
+  fi
+
+  [[ -f "$LAB_FAKE_BRIDGE_LOG_FILE" ]] && echo "event log: $LAB_FAKE_BRIDGE_LOG_FILE" || echo "event log: missing ($LAB_FAKE_BRIDGE_LOG_FILE)"
+  [[ -f "$LAB_FAKE_BRIDGE_OUT_FILE" ]] && echo "stdout log: $LAB_FAKE_BRIDGE_OUT_FILE" || echo "stdout log: missing ($LAB_FAKE_BRIDGE_OUT_FILE)"
+}
+
+do_lab_fake_bridge_link_cfg() {
+  require_paths
+
+  if [[ ! -s "$LAB_FAKE_BRIDGE_TTY_FILE" ]]; then
+    echo "tty file missing or empty: $LAB_FAKE_BRIDGE_TTY_FILE"
+    echo "start fake bridge first: ./tools/drukmix lab-fake-bridge-start"
+    exit 2
+  fi
+
+  local tty_path
+  tty_path="$(cat "$LAB_FAKE_BRIDGE_TTY_FILE")"
+  if [[ -z "$tty_path" ]]; then
+    echo "invalid tty path in: $LAB_FAKE_BRIDGE_TTY_FILE"
+    exit 2
+  fi
+
+  sed -i "s|^serial_port = .*|serial_port = ${tty_path}|" "$CFG_DST"
+  echo "linked config serial_port to fake bridge tty: $tty_path"
+  grep -n '^serial_port = ' "$CFG_DST" || true
+}
+
+do_lab_fake_bridge_report() {
+  if [[ ! -f "$LAB_FAKE_BRIDGE_LOG_FILE" ]]; then
+    echo "event log missing: $LAB_FAKE_BRIDGE_LOG_FILE"
+    exit 2
+  fi
+
+  python3 - "$LAB_FAKE_BRIDGE_LOG_FILE" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+total = 0
+set_flow = 0
+ping = 0
+first_ts = None
+last_ts = None
+last_target = None
+
+with open(path, "r", encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except Exception:
+            continue
+        total += 1
+        ts = row.get("ts_mono")
+        if isinstance(ts, (int, float)):
+            if first_ts is None:
+                first_ts = float(ts)
+            last_ts = float(ts)
+        ev = row.get("event")
+        if ev == "set_flow":
+            set_flow += 1
+            last_target = row.get("target_milli_lpm")
+        elif ev == "ping":
+            ping += 1
+
+print(f"log_file={path}")
+print(f"events_total={total}")
+print(f"events_set_flow={set_flow}")
+print(f"events_ping={ping}")
+if first_ts is not None and last_ts is not None:
+    print(f"window_s={last_ts-first_ts:.3f}")
+if last_target is not None:
+    print(f"last_target_milli_lpm={last_target}")
+PY
+}
+
 usage() {
   cat <<USAGE
-Usage: $0 <install|update|purge|restart|status|logs|doctor>
+Usage: $0 <install|update|purge|restart|status|logs|doctor|lab-fake-bridge-start|lab-fake-bridge-stop|lab-fake-bridge-status|lab-fake-bridge-link-cfg|lab-fake-bridge-report>
 USAGE
 }
 
@@ -601,5 +762,10 @@ case "$cmd" in
   status) do_status ;;
   logs) do_logs ;;
   doctor) do_doctor ;;
+  lab-fake-bridge-start) do_lab_fake_bridge_start ;;
+  lab-fake-bridge-stop) do_lab_fake_bridge_stop ;;
+  lab-fake-bridge-status) do_lab_fake_bridge_status ;;
+  lab-fake-bridge-link-cfg) do_lab_fake_bridge_link_cfg ;;
+  lab-fake-bridge-report) do_lab_fake_bridge_report ;;
   *) usage; exit 2 ;;
 esac
