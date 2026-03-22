@@ -31,6 +31,8 @@ PLANNER_FIELD_NAMES = [
 ]
 
 PRINT_STATE_FIELD_NAMES = ["state"]
+ERROR_RESPOND_DEDUP_S = 2.0
+_LAST_ERROR_RESPOND_TS: Dict[str, float] = {}
 
 
 def clamp(x: float, lo: float, hi: float) -> float:
@@ -504,6 +506,12 @@ def parse_remote_call(msg):
 async def maybe_respond(mr, ui_notify: bool, level: str, msg: str):
     if not ui_notify:
         return
+    if level == "error":
+        now = time.monotonic()
+        last = _LAST_ERROR_RESPOND_TS.get(msg)
+        if last is not None and (now - last) < ERROR_RESPOND_DEDUP_S:
+            return
+        _LAST_ERROR_RESPOND_TS[msg] = now
     try:
         await mr.respond(level, msg)
     except Exception:
@@ -620,6 +628,7 @@ async def run_agent(cfg_path: str):
             last_probe_poll_t = 0.0
             last_transition_key = None
             remote_stop_latched = False
+            last_remote_stop_cmd_t = 0.0
 
             while True:
                 now = time.monotonic()
@@ -716,6 +725,9 @@ async def run_agent(cfg_path: str):
                         continue
 
                     if method == "drukmix_stop":
+                        if (now - last_remote_stop_cmd_t) < 2.0:
+                            continue
+
                         if ks.print_state != "paused":
                             remote_stop_latched = False
 
@@ -734,6 +746,7 @@ async def run_agent(cfg_path: str):
                                 pass
                         await maybe_respond(mr, cfg.ui_notify, "error", "DrukMix: STOP")
                         remote_stop_latched = True
+                        last_remote_stop_cmd_t = now
                         continue
 
                     if method == "drukmix_flush":
