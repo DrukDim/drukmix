@@ -40,6 +40,10 @@ LAB_FAKE_BRIDGE_TTY_FILE="${LAB_FAKE_BRIDGE_TTY_FILE:-/tmp/drukmix_fake_bridge.t
 LAB_FAKE_BRIDGE_LOG_FILE="${LAB_FAKE_BRIDGE_LOG_FILE:-/tmp/drukmix_fake_bridge.jsonl}"
 LAB_FAKE_BRIDGE_OUT_FILE="${LAB_FAKE_BRIDGE_OUT_FILE:-/tmp/drukmix_fake_bridge.out}"
 LAB_FAKE_BRIDGE_PID_FILE="${LAB_FAKE_BRIDGE_PID_FILE:-/tmp/drukmix_fake_bridge.pid}"
+LAB_PROBE_MEASURE_SCRIPT="$REPO_DIR/tools/lab/measure_probe_lead.py"
+LAB_PROBE_MEASURE_OUT="${LAB_PROBE_MEASURE_OUT:-/tmp/drukmix_probe_lead_report.json}"
+LAB_PROBE_MEASURE_DURATION_S="${LAB_PROBE_MEASURE_DURATION_S:-45}"
+LAB_PROBE_MEASURE_POLL_S="${LAB_PROBE_MEASURE_POLL_S:-0.10}"
 
 require_repo() {
   test -f "$REPO_DIR/drukmix_agent.py"
@@ -747,9 +751,28 @@ if last_target is not None:
 PY
 }
 
+do_lab_probe_measure() {
+  require_repo
+  require_paths
+  ensure_venv
+
+  if [[ ! -f "$LAB_PROBE_MEASURE_SCRIPT" ]]; then
+    echo "probe measure script missing: $LAB_PROBE_MEASURE_SCRIPT"
+    exit 2
+  fi
+
+  "$REPO_DIR/.venv/bin/python" "$LAB_PROBE_MEASURE_SCRIPT" \
+    --moonraker-http "http://127.0.0.1:7125" \
+    --cfg "$CFG_DST" \
+    --bridge-log "$LAB_FAKE_BRIDGE_LOG_FILE" \
+    --duration-s "$LAB_PROBE_MEASURE_DURATION_S" \
+    --poll-s "$LAB_PROBE_MEASURE_POLL_S" \
+    --out-json "$LAB_PROBE_MEASURE_OUT"
+}
+
 usage() {
   cat <<USAGE
-Usage: $0 <install|update|purge|restart|status|logs|doctor|lab-fake-bridge-start|lab-fake-bridge-stop|lab-fake-bridge-status|lab-fake-bridge-link-cfg|lab-fake-bridge-report>
+Usage: $0 <install|update|purge|restart|status|logs|doctor|lab-fake-bridge-start|lab-fake-bridge-stop|lab-fake-bridge-status|lab-fake-bridge-link-cfg|lab-fake-bridge-report|lab-probe-measure>
 USAGE
 }
 
@@ -767,5 +790,6 @@ case "$cmd" in
   lab-fake-bridge-status) do_lab_fake_bridge_status ;;
   lab-fake-bridge-link-cfg) do_lab_fake_bridge_link_cfg ;;
   lab-fake-bridge-report) do_lab_fake_bridge_report ;;
+  lab-probe-measure) do_lab_probe_measure ;;
   *) usage; exit 2 ;;
 esac
