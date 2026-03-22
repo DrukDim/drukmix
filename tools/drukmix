@@ -778,9 +778,29 @@ do_lab_probe_measure() {
     --out-json "$LAB_PROBE_MEASURE_OUT"
 }
 
+do_cfg_reset() {
+  require_repo
+  require_paths
+
+  if [[ ! -f "$CFG_DST" ]]; then
+    echo "Config not found: $CFG_DST"
+    echo "Run install first."
+    exit 2
+  fi
+
+  local backup_path
+  backup_path="$CFG_DST.bak.$(date +%Y%m%d_%H%M%S)"
+  cp "$CFG_DST" "$backup_path"
+  cp "$CFG_TEMPLATE" "$CFG_DST"
+  patch_cfg_if_needed
+
+  echo "Reset config from template: $CFG_TEMPLATE -> $CFG_DST"
+  echo "Backup saved: $backup_path"
+}
+
 usage() {
   cat <<USAGE
-Usage: $0 <install|update|purge|restart|status|logs|doctor|lab-fake-bridge-start|lab-fake-bridge-stop|lab-fake-bridge-status|lab-fake-bridge-link-cfg|lab-fake-bridge-report|lab-probe-measure>
+Usage: $0 <install|update|cfg-reset|purge|restart|status|logs|doctor|lab-fake-bridge-start|lab-fake-bridge-stop|lab-fake-bridge-status|lab-fake-bridge-link-cfg|lab-fake-bridge-report|lab-probe-measure>
 USAGE
 }
 
@@ -788,6 +808,7 @@ cmd="${1:-}"
 case "$cmd" in
   install) do_install ;;
   update) do_update ;;
+  cfg-reset) do_cfg_reset ;;
   purge) do_purge ;;
   restart) do_restart ;;
   status) do_status ;;
