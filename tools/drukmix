@@ -34,6 +34,8 @@ SERVICE_DST="/etc/systemd/system/drukmix.service"
 KLIPPER_DIR="${KLIPPER_DIR:-$USER_HOME/klipper}"
 KLIPPER_EXTRA_SRC="$REPO_DIR/klipper_extra/drukmix_planner_probe.py"
 KLIPPER_EXTRA_DST="$KLIPPER_DIR/klippy/extras/drukmix_planner_probe.py"
+KLIPPER_VEXT_SRC="$REPO_DIR/klipper_extra/drukmix_virtual_extruder.py"
+KLIPPER_VEXT_DST="$KLIPPER_DIR/klippy/extras/drukmix_virtual_extruder.py"
 
 LAB_FAKE_BRIDGE_SCRIPT="$REPO_DIR/tools/lab/fake_bridge_pty.py"
 LAB_FAKE_BRIDGE_TTY_FILE="${LAB_FAKE_BRIDGE_TTY_FILE:-/tmp/drukmix_fake_bridge.tty}"
@@ -410,6 +412,10 @@ install_klipper_extra_if_present() {
 
   install -m 0644 "$KLIPPER_EXTRA_SRC" "$KLIPPER_EXTRA_DST"
   echo "installed planner klipper extra: $KLIPPER_EXTRA_DST"
+  if [[ -f "$KLIPPER_VEXT_SRC" ]]; then
+    install -m 0644 "$KLIPPER_VEXT_SRC" "$KLIPPER_VEXT_DST"
+    echo "installed virtual extruder klipper extra: $KLIPPER_VEXT_DST"
+  fi
 }
 
 bridge_status() {
@@ -493,6 +499,7 @@ do_purge() {
   rm -f "$PRINTER_CFG_DIR/drukmix_planner.cfg"
   rm -f "$PRINTER_CFG_DIR/drukmix_research.cfg"
   rm -f "$KLIPPER_EXTRA_DST"
+  rm -f "$KLIPPER_VEXT_DST"
 
   remove_include_line "[include drukmix_macros.cfg]"
   remove_include_line "[include drukmix_research.cfg]"
@@ -580,6 +587,7 @@ do_doctor() {
   [[ -f "$LEGACY_PLANNER_DST" ]] && echo "legacy planner config: present ($LEGACY_PLANNER_DST)" || echo "legacy planner config: not used"
   [[ -f "$SERVICE_DST" ]] && echo "service file: ok ($SERVICE_DST)" || echo "service file: missing ($SERVICE_DST)"
   [[ -f "$KLIPPER_EXTRA_DST" ]] && echo "planner klipper extra: ok ($KLIPPER_EXTRA_DST)" || echo "planner klipper extra: missing ($KLIPPER_EXTRA_DST)"
+  [[ -f "$KLIPPER_VEXT_DST" ]] && echo "virtual extruder extra: ok ($KLIPPER_VEXT_DST)" || echo "virtual extruder extra: not installed (for lab/VM use only)"
 
   echo
   bridge_status
