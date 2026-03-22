@@ -810,14 +810,29 @@ do_cfg_reset() {
     exit 2
   fi
 
-  local backup_path
-  backup_path="$CFG_DST.bak.$(date +%Y%m%d_%H%M%S)"
-  cp "$CFG_DST" "$backup_path"
+  local ts cfg_backup macros_backup
+  ts="$(date +%Y%m%d_%H%M%S)"
+
+  cfg_backup="$CFG_DST.bak.$ts"
+  cp "$CFG_DST" "$cfg_backup"
+
+  if [[ -f "$MACROS_DST" ]]; then
+    macros_backup="$MACROS_DST.bak.$ts"
+    cp "$MACROS_DST" "$macros_backup"
+  fi
+
   cp "$CFG_TEMPLATE" "$CFG_DST"
+  cp "$MACROS_TEMPLATE" "$MACROS_DST"
   patch_cfg_if_needed
 
   echo "Reset config from template: $CFG_TEMPLATE -> $CFG_DST"
-  echo "Backup saved: $backup_path"
+  echo "Reset macros from template: $MACROS_TEMPLATE -> $MACROS_DST"
+  echo "Config backup saved: $cfg_backup"
+  if [[ -n "${macros_backup:-}" ]]; then
+    echo "Macros backup saved: $macros_backup"
+  else
+    echo "Macros backup: none (file did not exist before reset)"
+  fi
 }
 
 usage() {
