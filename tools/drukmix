@@ -304,10 +304,11 @@ install_service() {
   local rendered
   rendered="$(mktemp)"
 
-  # Render unit for current host user/home to avoid ad hoc printer-side edits.
+  # Render unit for current host user and actual repo/config paths.
   sed \
     -e "s|^User=.*$|User=${USER_NAME}|" \
-    -e "s|/home/drukos|${USER_HOME}|g" \
+    -e "s|^WorkingDirectory=.*$|WorkingDirectory=${REPO_DIR}|" \
+    -e "s|^ExecStart=.*$|ExecStart=${REPO_DIR}/.venv/bin/python ${REPO_DIR}/drukmix_agent.py --config ${PRINTER_CFG_DIR}/drukmix.cfg|" \
     "$SERVICE_TEMPLATE" > "$rendered"
 
   sudo install -m 0644 "$rendered" "$SERVICE_DST"
