@@ -31,6 +31,7 @@ PLANNER_FIELD_NAMES = [
 ]
 
 PRINT_STATE_FIELD_NAMES = ["state"]
+PAUSE_RESUME_FIELD_NAMES = ["is_paused"]
 ERROR_RESPOND_DEDUP_S = 2.0
 _LAST_ERROR_RESPOND_TS: Dict[str, float] = {}
 
@@ -67,6 +68,7 @@ class Cfg:
     pump_stop_lookahead_s: float
     pump_prestart_pct: float
     pump_prestop_ramp_s: float
+    pump_prestop_min_gap_s: float
     planner_stale_timeout_s: float
 
     update_hz: float
@@ -95,6 +97,7 @@ class KlipperState:
     planner_control_velocity_mms: float = 0.0
     planner_last_update_t: float = 0.0
     print_state: str = "standby"
+    pause_resume_is_paused: bool = False
 
 
 @dataclasses.dataclass
@@ -163,8 +166,9 @@ def load_config(path: str) -> Cfg:
         pump_run_lookahead_s=_get_float(s, "pump_run_lookahead_s", 1.0),
         pump_stop_lookahead_s=_get_float(s, "pump_stop_lookahead_s", 3.0),
         pump_prestart_pct=_get_float(s, "pump_prestart_pct", 18.0),
-        pump_prestop_ramp_s=_get_float(s, "pump_prestop_ramp_s", 3.0),
-        planner_stale_timeout_s=_get_float(s, "planner_stale_timeout_s", 1.5),
+        pump_prestop_ramp_s=_get_float(s, "pump_prestop_ramp_s", 0.0),
+        pump_prestop_min_gap_s=_get_float(s, "pump_prestop_min_gap_s", 3.0),
+        planner_stale_timeout_s=_get_float(s, "planner_stale_timeout_s", 0.0),
 
         update_hz=_get_float(s, "update_hz", 6.0),
         log_period_s=_get_float(s, "log_period_s", 5.0),
@@ -253,6 +257,9 @@ def apply_status(ks: KlipperState, st: Dict[str, Any], now: float) -> None:
         except Exception:
             ks.extrude_factor = 1.0
 
+    if "pause_resume" in st and isinstance(st["pause_resume"], dict):
+        ks.pause_resume_is_paused = bool(st["pause_resume"].get("is_paused"))
+
     if "drukmix_planner_probe" in st and isinstance(st["drukmix_planner_probe"], dict):
         pp = st["drukmix_planner_probe"]
 
@@ -296,8 +303,11 @@ def planner_semantic_should_run(cfg: Cfg, ks: KlipperState, pump_running_hint: b
     # on backend "running" reporting, which can lag or be unavailable.
     if active_print_window:
         if t_stop <= max(0.0, float(cfg.pump_stop_lookahead_s)):
-            # Keep command asserted during prestop and let target ramp logic
-            # taper output; dropping command here causes premature hard-off.
+            # Ignore prestop for short inter-window gaps; treat as normal print
+            # until the active window closes.
+            min_gap = max(0.0, float(cfg.pump_prestop_min_gap_s))
+            if t_start is not None and t_start <= min_gap:
+                return True, "print"
             return True, "prestop"
         return True, "print"
 
@@ -413,6 +423,7 @@ class MoonrakerClient:
         await self.call("printer.objects.subscribe", {
             "objects": {
                 "gcode_move": ["extrude_factor"],
+                "pause_resume": PAUSE_RESUME_FIELD_NAMES,
                 "drukmix_planner_probe": PLANNER_FIELD_NAMES,
             }
         })
@@ -603,6 +614,7 @@ async def run_agent(cfg_path: str):
                     "objects": {
                         "print_stats": PRINT_STATE_FIELD_NAMES,
                         "gcode_move": ["extrude_factor"],
+                        "pause_resume": PAUSE_RESUME_FIELD_NAMES,
                         "drukmix_planner_probe": PLANNER_FIELD_NAMES,
                     }
                 })
@@ -640,6 +652,7 @@ async def run_agent(cfg_path: str):
                             "objects": {
                                 "print_stats": PRINT_STATE_FIELD_NAMES,
                                 "gcode_move": ["extrude_factor"],
+                                "pause_resume": PAUSE_RESUME_FIELD_NAMES,
                                 "drukmix_planner_probe": PLANNER_FIELD_NAMES,
                             }
                         })
@@ -707,6 +720,7 @@ async def run_agent(cfg_path: str):
                         continue
 
                     method, params = rc
+                    printer_is_paused = bool(ks.pause_resume_is_paused or ks.print_state == "paused")
 
                     st_for_status = backend.poll_status()
                     control_velocity_for_status = select_control_velocity(cfg, ks)
@@ -728,7 +742,7 @@ async def run_agent(cfg_path: str):
                         if (now - last_remote_stop_cmd_t) < 2.0:
                             continue
 
-                        if ks.print_state != "paused":
+                        if not printer_is_paused:
                             remote_stop_latched = False
 
                         if remote_stop_latched:
@@ -739,7 +753,7 @@ async def run_agent(cfg_path: str):
                         fs.until_t = 0.0
                         backend.stop()
                         last_target_pct = 0.0
-                        if ks.print_state != "paused":
+                        if not printer_is_paused:
                             try:
                                 await mr.pause_print()
                             except Exception:
@@ -933,9 +947,14 @@ async def run_agent(cfg_path: str):
                         rev = False
                         stop = target_pct <= 0.0
                     elif semantic_reason == "prestop":
-                        target_pct = prestop_ramp_pct(cfg, ks, out.target_pct)
+                        if float(cfg.pump_prestop_ramp_s) <= 0.0:
+                            target_pct = 0.0
+                        else:
+                            target_pct = prestop_ramp_pct(cfg, ks, out.target_pct)
                         rev = False
                         stop = target_pct <= 0.0
+
+                printer_is_paused = bool(ks.pause_resume_is_paused or ks.print_state == "paused")
 
                 if stop:
                     backend.stop()
@@ -961,6 +980,7 @@ async def run_agent(cfg_path: str):
                 offline_pause_condition = (
                     cfg.pause_on_pump_offline
                     and should_run_now
+                    and (not printer_is_paused)
                     and (not st.link_ok)
                     and (offline_by_age or offline_by_time)
                 )
@@ -986,12 +1006,17 @@ async def run_agent(cfg_path: str):
                         await mr.pause_print()
                     except Exception:
                         pass
-                    await maybe_respond(mr, cfg.ui_notify, "error", "DrukMix: pump offline")
+                    await maybe_respond(mr, cfg.ui_notify, "error", "DrukMix: bridge/pump offline")
                     pause_latched_offline = True
                 elif not offline_pause_condition:
                     pause_latched_offline = False
 
-                blocked_mode_pause_condition = cfg.pause_on_manual_mode and semantic_should_run_now and not auto_allowed
+                blocked_mode_pause_condition = (
+                    cfg.pause_on_manual_mode
+                    and semantic_should_run_now
+                    and not auto_allowed
+                    and (not printer_is_paused)
+                )
 
                 if blocked_mode_pause_condition and (not pause_latched_blocked_mode):
                     log.warning(
