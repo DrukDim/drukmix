@@ -183,6 +183,8 @@ def nearest_flow(events: list[FlowEvent], ts: float) -> Optional[FlowEvent]:
 
 
 def to_plain(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return {k: to_plain(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [to_plain(x) for x in obj]
     if hasattr(obj, "__dataclass_fields__"):
