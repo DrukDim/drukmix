@@ -409,7 +409,7 @@ def main() -> int:
     segments = semantic_segments(samples, prestart_s=prestart_s, prestop_s=prestop_s)
     edges = flow_edges(bridge_events, samples)
 
-    # Correlation and on/off consistency during print windows.
+    # Correlation and on/off consistency during controller-driven windows.
     active_pairs: list[tuple[float, float]] = []
     vel_pos_total = 0
     vel_pos_pump_on = 0
@@ -427,7 +427,7 @@ def main() -> int:
             last_target = float(bridge_events[bridge_idx].target_milli_lpm)
             bridge_idx += 1
 
-        if not s.print_window_active:
+        if row["semantic"] not in ("prestart", "print", "prestop"):
             continue
         if s.control_velocity_mms is None:
             continue
