@@ -67,14 +67,16 @@ AGENT_BIN="${REPO_ROOT}/drukmix_driver.py"
 FORCE=0
 INSTALL_SERVICE=0
 SYMLINK_CONTROLLER=0
+FORCE_AGENT_CFG=0
 
 log() { printf "[drukmix-setup] %s\n" "$*" >&2; }
 die() { log "ERROR: $*"; exit 1; }
 
 usage() {
   cat >&2 <<EOF
-Usage: $0 [--force] [--symlink-controller] [--install-service] [--help]
+Usage: $0 [--force] [--force-agent-cfg] [--symlink-controller] [--install-service] [--help]
   --force               overwrite existing files (configs/unit/controller/unit)
+  --force-agent-cfg      overwrite existing drukmix_agent.cfg
   --symlink-controller  place controller as symlink into klippy/extras
   --install-service     install systemd service for drukmix driver
   --help                show this help
@@ -85,6 +87,9 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --force)
       FORCE=1
+      ;;
+    --force-agent-cfg)
+      FORCE_AGENT_CFG=1
       ;;
     --symlink-controller)
       SYMLINK_CONTROLLER=1
@@ -163,7 +168,11 @@ install_controller() {
 install_configs() {
   copy_if_missing "$MACROS_SRC" "$MACROS_DST"
   copy_if_missing "$CTRL_CFG_SRC" "$CTRL_CFG_DST"
-  copy_if_missing "$AGENT_CFG_SRC" "$AGENT_CFG_DST"
+  if [[ -e "$AGENT_CFG_DST" && $FORCE_AGENT_CFG -eq 0 ]]; then
+    log "skip (exists): $AGENT_CFG_DST"
+  else
+    copy_if_missing "$AGENT_CFG_SRC" "$AGENT_CFG_DST"
+  fi
   append_include_if_missing "[include $(basename "$CTRL_CFG_DST")]" "$PRINTER_CFG_PATH"
   append_include_if_missing "[include $(basename "$MACROS_DST")]" "$PRINTER_CFG_PATH"
 }
