@@ -44,6 +44,8 @@ class Cfg:
     ui_notify: bool
     log_file: str
     log_level: str
+    debug_log: bool
+    debug_log_period_s: float
     cfg_path: str = ""
 
 
@@ -93,6 +95,8 @@ def load_cfg(path: str) -> Cfg:
             s, "log_file", os.path.expanduser("~/printer_data/logs/drukmix_driver.log")
         ),
         log_level=_get_str(s, "log_level", "info").lower(),
+        debug_log=get_bool("debug_log", False),
+        debug_log_period_s=_get_float(s, "debug_log_period_s", 1.0),
         cfg_path=path,
     )
 
@@ -223,6 +227,7 @@ class Driver:
         self.flush_pct: float = 0.0
         self.flush_rev: bool = False
         self.status = ControllerStatus()
+        self._last_debug_t: float = 0.0
 
     async def start(self):
         transport = BridgeUsbTransport(self.cfg.serial_port, self.cfg.serial_baud)
@@ -392,7 +397,25 @@ class Driver:
         if self.flush_until <= 0.0:
             age = now - self.status.last_t
             stale = (age > max(0.1, self.cfg.status_timeout_s)) or self.status.stale
-            if (not self.status.available) or stale or self.status.state == "blocked":
+            blocked = (
+                (not self.status.available) or stale or self.status.state == "blocked"
+            )
+            if self.cfg.debug_log and (now - self._last_debug_t) >= max(
+                0.2, self.cfg.debug_log_period_s
+            ):
+                self._last_debug_t = now
+                self.log.info(
+                    "driver tick: state=%s target_pct=%.2f rev=%d available=%d stale=%d age=%.3f blocked=%d reason=%s",
+                    self.status.state,
+                    float(self.status.target_pct),
+                    int(self.status.rev),
+                    int(self.status.available),
+                    int(stale),
+                    age,
+                    int(blocked),
+                    self.status.reason,
+                )
+            if blocked:
                 self.backend.stop()
             else:
                 pct = max(0.0, min(100.0, float(self.status.target_pct)))
