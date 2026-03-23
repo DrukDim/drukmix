@@ -6,10 +6,9 @@ import json
 import math
 import time
 import urllib.request
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Optional
-
 
 QUERY_FIELDS = {
     "print_stats": ["state", "filename", "print_duration"],
@@ -20,6 +19,7 @@ QUERY_FIELDS = {
         "time_to_print_stop_s",
         "control_velocity_mms",
     ],
+    "drukmix_controller": ["state"],
     "virtual_sdcard": ["file_position", "progress", "is_active", "file_size"],
 }
 
@@ -39,6 +39,7 @@ class Sample:
     file_position: Optional[int]
     progress: Optional[float]
     sd_active: Optional[bool]
+    controller_state: Optional[str]
 
 
 @dataclass
@@ -86,6 +87,7 @@ def moonraker_query(base: str) -> Sample:
     status = result.get("status", {}) if isinstance(result, dict) else {}
     ps = status.get("print_stats", {}) if isinstance(status, dict) else {}
     pp = status.get("drukmix_planner_probe", {}) if isinstance(status, dict) else {}
+    cc = status.get("drukmix_controller", {}) if isinstance(status, dict) else {}
     vs = status.get("virtual_sdcard", {}) if isinstance(status, dict) else {}
 
     eventtime = _safe_float(result.get("eventtime"))
@@ -106,6 +108,7 @@ def moonraker_query(base: str) -> Sample:
         file_position=_safe_int(vs.get("file_position")),
         progress=_safe_float(vs.get("progress")),
         sd_active=bool(vs.get("is_active")) if "is_active" in vs else None,
+        controller_state=cc.get("state") if isinstance(cc, dict) else None,
     )
 
 
@@ -163,6 +166,17 @@ def parse_bridge_events(path: Path, start_mono: float) -> list[FlowEvent]:
 
 
 def semantic_of(sample: Sample, prestart_s: float, prestop_s: float) -> str:
+    # Prefer controller state when available (authoritative orchestration)
+    if sample.controller_state:
+        state = str(sample.controller_state)
+        if state == "prestart":
+            return "prestart"
+        if state == "prestop":
+            return "prestop"
+        if state in ("run", "print"):
+            return "print"
+        if state == "blocked":
+            return "other"
     t_start = sample.time_to_print_start_s
     t_stop = sample.time_to_print_stop_s
     if sample.print_window_active:
@@ -209,7 +223,9 @@ def semantic_segments(
     for idx in range(1, len(samples) + 1):
         cur_sem = None
         if idx < len(samples):
-            cur_sem = semantic_of(samples[idx], prestart_s=prestart_s, prestop_s=prestop_s)
+            cur_sem = semantic_of(
+                samples[idx], prestart_s=prestart_s, prestop_s=prestop_s
+            )
         if idx == len(samples) or cur_sem != prev_sem:
             first = samples[start_index]
             last = samples[idx - 1]
@@ -239,7 +255,9 @@ def semantic_segments(
     return out
 
 
-def flow_edges(events: list[FlowEvent], samples: list[Sample]) -> dict[str, list[dict[str, Any]]]:
+def flow_edges(
+    events: list[FlowEvent], samples: list[Sample]
+) -> dict[str, list[dict[str, Any]]]:
     starts: list[dict[str, Any]] = []
     stops: list[dict[str, Any]] = []
     prev_target = 0
@@ -282,10 +300,15 @@ def to_plain(obj: Any) -> Any:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Audit prestart/print/prestop transitions and pump-flow sync")
+    ap = argparse.ArgumentParser(
+        description="Audit prestart/print/prestop transitions and pump-flow sync"
+    )
     ap.add_argument("--moonraker-http", default="http://127.0.0.1:7125")
     ap.add_argument("--bridge-log", default="/tmp/drukmix_fake_bridge.jsonl")
-    ap.add_argument("--drukmix-log", default=str(Path("~/printer_data/logs/drukmix.log").expanduser()))
+    ap.add_argument(
+        "--drukmix-log",
+        default=str(Path("~/printer_data/logs/drukmix.log").expanduser()),
+    )
     ap.add_argument("--duration-s", type=float, default=300.0)
     ap.add_argument("--poll-s", type=float, default=0.10)
     ap.add_argument("--prestart-lookahead-s", type=float, default=4.0)
@@ -301,7 +324,11 @@ def main() -> int:
     prestop_s = max(0.0, float(args.prestop_lookahead_s))
 
     run_tag = time.strftime("%Y%m%d_%H%M%S")
-    out_dir = Path(args.out_dir) if args.out_dir else Path(f"/tmp/drukmix_sync_audit_{run_tag}")
+    out_dir = (
+        Path(args.out_dir)
+        if args.out_dir
+        else Path(f"/tmp/drukmix_sync_audit_{run_tag}")
+    )
     out_dir.mkdir(parents=True, exist_ok=True)
 
     bridge_path = Path(args.bridge_log)
@@ -350,10 +377,12 @@ def main() -> int:
 
     semantic_samples = []
     for s in samples:
-        semantic_samples.append({
-            "sample": s,
-            "semantic": semantic_of(s, prestart_s=prestart_s, prestop_s=prestop_s),
-        })
+        semantic_samples.append(
+            {
+                "sample": s,
+                "semantic": semantic_of(s, prestart_s=prestart_s, prestop_s=prestop_s),
+            }
+        )
 
     transition_points = []
     prev_sem = None
@@ -391,7 +420,10 @@ def main() -> int:
     last_target = 0.0
     for row in semantic_samples:
         s: Sample = row["sample"]
-        while bridge_idx < len(bridge_events) and bridge_events[bridge_idx].ts_mono <= s.ts_mono:
+        while (
+            bridge_idx < len(bridge_events)
+            and bridge_events[bridge_idx].ts_mono <= s.ts_mono
+        ):
             last_target = float(bridge_events[bridge_idx].target_milli_lpm)
             bridge_idx += 1
 
@@ -425,11 +457,15 @@ def main() -> int:
             corr = cov / math.sqrt(vx * vy)
 
     ratio_vel_pos = (vel_pos_pump_on / vel_pos_total) if vel_pos_total else None
-    ratio_vel_zeroish = (vel_zeroish_pump_on / vel_zeroish_total) if vel_zeroish_total else None
+    ratio_vel_zeroish = (
+        (vel_zeroish_pump_on / vel_zeroish_total) if vel_zeroish_total else None
+    )
 
     # Additional evidence from agent transitions log lines.
     semantic_log_lines = [
-        ln for ln in drukmix_new.splitlines() if "drukmix transition:" in ln and "semantic=" in ln
+        ln
+        for ln in drukmix_new.splitlines()
+        if "drukmix transition:" in ln and "semantic=" in ln
     ]
 
     summary = {
@@ -506,11 +542,15 @@ def main() -> int:
         encoding="utf-8",
     )
     (out_dir / "bridge_set_flow.jsonl").write_text(
-        "".join(json.dumps(to_plain(e), ensure_ascii=True) + "\n" for e in bridge_events),
+        "".join(
+            json.dumps(to_plain(e), ensure_ascii=True) + "\n" for e in bridge_events
+        ),
         encoding="utf-8",
     )
     (out_dir / "drukmix_new.log").write_text(drukmix_new, encoding="utf-8")
-    (out_dir / "summary.json").write_text(json.dumps(to_plain(summary), ensure_ascii=True, indent=2), encoding="utf-8")
+    (out_dir / "summary.json").write_text(
+        json.dumps(to_plain(summary), ensure_ascii=True, indent=2), encoding="utf-8"
+    )
 
     print(json.dumps(to_plain(summary), ensure_ascii=True, indent=2))
     print(f"OUTDIR {out_dir}")
