@@ -277,15 +277,20 @@ class Driver:
             self.log.warning(f"initial query failed: {e}")
 
     def _apply_controller_status(self, st: Dict[str, Any], now: float):
-        self.status = ControllerStatus(
-            state=str(st.get("state", "blocked")),
-            target_pct=float(st.get("target_pct", 0.0) or 0.0),
-            rev=bool(st.get("rev", False)),
-            reason=str(st.get("reason", "unknown")),
-            available=bool(st.get("available", False)),
-            stale=bool(st.get("stale", True)),
-            last_t=now,
-        )
+        if "state" in st:
+            self.status.state = str(st.get("state", self.status.state))
+        if "target_pct" in st:
+            v = st.get("target_pct", 0.0)
+            self.status.target_pct = float(v or 0.0)
+        if "rev" in st:
+            self.status.rev = bool(st.get("rev", False))
+        if "reason" in st:
+            self.status.reason = str(st.get("reason", self.status.reason))
+        if "available" in st:
+            self.status.available = bool(st.get("available", self.status.available))
+        if "stale" in st:
+            self.status.stale = bool(st.get("stale", self.status.stale))
+        self.status.last_t = now
 
     async def _handle_remote(self, method: str, params: dict):
         now = time.monotonic()
