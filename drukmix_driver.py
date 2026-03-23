@@ -15,6 +15,7 @@ import websockets
 
 from backend.backend_pumptpl import PumpTplBackend
 from backend.backend_pumpvfd import PumpVfdBackend
+from backend.bridge_fake_transport import FakeBridgeTransport
 from backend.bridge_usb_transport import BridgeUsbTransport
 
 CONTROLLER_FIELDS = [
@@ -37,8 +38,14 @@ class Cfg:
     enabled: bool
     moonraker_ws: str
     backend: str
+    transport: str
     serial_port: str
     serial_baud: int
+    fake_bridge_log: str
+    fake_max_lpm: float
+    fake_tau_up_s: float
+    fake_tau_down_s: float
+    fake_running_threshold_pct: float
     update_hz: float
     status_timeout_s: float
     ui_notify: bool
@@ -86,8 +93,16 @@ def load_cfg(path: str) -> Cfg:
         enabled=get_bool("enabled", True),
         moonraker_ws=_get_str(s, "moonraker_ws", "ws://127.0.0.1:7125/websocket"),
         backend=_get_str(s, "backend", "pumpvfd"),
+        transport=_get_str(s, "transport", "usb").lower(),
         serial_port=_get_str(s, "serial_port", "/dev/drukos-bridge"),
         serial_baud=_get_int(s, "serial_baud", 921600),
+        fake_bridge_log=_get_str(
+            s, "fake_bridge_log", "/tmp/drukmix_fake_bridge.jsonl"
+        ),
+        fake_max_lpm=_get_float(s, "fake_max_lpm", 10.0),
+        fake_tau_up_s=_get_float(s, "fake_tau_up_s", 1.0),
+        fake_tau_down_s=_get_float(s, "fake_tau_down_s", 0.8),
+        fake_running_threshold_pct=_get_float(s, "fake_running_threshold_pct", 2.0),
         update_hz=_get_float(s, "update_hz", 6.0),
         status_timeout_s=_get_float(s, "status_timeout_s", 2.0),
         ui_notify=get_bool("ui_notify", True),
@@ -230,7 +245,17 @@ class Driver:
         self._last_debug_t: float = 0.0
 
     async def start(self):
-        transport = BridgeUsbTransport(self.cfg.serial_port, self.cfg.serial_baud)
+        if self.cfg.transport == "fake":
+            transport = FakeBridgeTransport(
+                log_jsonl=self.cfg.fake_bridge_log,
+                max_lpm=self.cfg.fake_max_lpm,
+                tau_up_s=self.cfg.fake_tau_up_s,
+                tau_down_s=self.cfg.fake_tau_down_s,
+                running_threshold_pct=self.cfg.fake_running_threshold_pct,
+            )
+        else:
+            transport = BridgeUsbTransport(self.cfg.serial_port, self.cfg.serial_baud)
+
         if self.cfg.backend == "pumptpl":
             self.backend = PumpTplBackend(transport)
         else:
