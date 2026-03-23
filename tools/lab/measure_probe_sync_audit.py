@@ -177,6 +177,8 @@ def semantic_of(sample: Sample, prestart_s: float, prestop_s: float) -> str:
             return "print"
         if state == "blocked":
             return "other"
+        if state == "idle":
+            return "other"
     t_start = sample.time_to_print_start_s
     t_stop = sample.time_to_print_stop_s
     if sample.print_window_active:
