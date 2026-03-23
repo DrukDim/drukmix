@@ -75,6 +75,7 @@ class DrukMixController:
         self._last_log_t = 0.0
         self._min_flow_until = 0.0
         self._last_planner_eventtime = 0.0
+        self._last_state = "idle"
 
         self.liters_per_mm = self._calc_liters_per_mm(self.filament_diameter_mm)
 
@@ -232,9 +233,9 @@ class DrukMixController:
         available = bool(planner.get("available", False))
         t_start = planner.get("time_to_print_start_s")
         t_stop = planner.get("time_to_print_stop_s")
-        print_window_active = bool(planner.get("print_window_active", False))
         control_velocity = float(planner.get("control_velocity_mms", 0.0))
         stale = not self._planner_is_fresh(eventtime)
+        active_window = t_stop is not None
 
         if not available:
             return self._build_status(
@@ -259,7 +260,7 @@ class DrukMixController:
         if stale:
             semantic_state = "blocked"
             reason = "stale"
-        elif print_window_active:
+        elif active_window:
             # Active window; choose run or prestop.
             if t_stop is not None and t_stop <= self.stop_lookahead_s:
                 if t_start is not None and t_start <= self.prestop_min_gap_s:
@@ -285,7 +286,8 @@ class DrukMixController:
                 rev = False
                 reason = "prestart"
             elif (
-                t_start is not None
+                self._last_state == "run"
+                and t_start is not None
                 and t_start <= self.run_lookahead_s
                 and run_pct > 0.0
             ):
@@ -299,6 +301,7 @@ class DrukMixController:
                 rev = False
                 reason = "idle"
 
+        self._last_state = semantic_state
         return self._build_status(
             state=semantic_state,
             target_pct=target_pct,
