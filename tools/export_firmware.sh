@@ -33,8 +33,10 @@ ARGS
 }
 
 export_one bridge
+export_one pump_tpl
 export_one pump_vfd
 
 echo "Exported firmware artifacts to:"
 echo "  firmware/releases/bridge"
+echo "  firmware/releases/pump_tpl"
 echo "  firmware/releases/pump_vfd"

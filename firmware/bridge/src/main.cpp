@@ -38,7 +38,13 @@ static uint32_t pending_ack_timeout_ms() {
 }
 
 static const PeerRecord* find_pump_peer() {
-  return g_peer_table.find_by_node(0x0100);
+  const PeerRecord* vfd = g_peer_table.find_by_node(PUMP_NODE_ID_VFD);
+  const PeerRecord* tpl = g_peer_table.find_by_node(PUMP_NODE_ID_TPL);
+
+  if (vfd && tpl) {
+    return (vfd->last_seen_ms >= tpl->last_seen_ms) ? vfd : tpl;
+  }
+  return vfd ? vfd : tpl;
 }
 
 static void on_now_recv(const uint8_t* mac_addr, const uint8_t* data, int len) {

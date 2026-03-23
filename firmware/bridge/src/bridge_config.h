@@ -3,6 +3,8 @@
 
 static constexpr uint8_t  BRIDGE_PROTO = 1;
 static constexpr uint16_t BRIDGE_NODE_ID = 0x0001;
+static constexpr uint16_t PUMP_NODE_ID_VFD = 0x0100;
+static constexpr uint16_t PUMP_NODE_ID_TPL = 0x0101;
 
 static constexpr int      WIFI_CHANNEL = 6;
 static constexpr int      SERIAL_BAUD = 921600;

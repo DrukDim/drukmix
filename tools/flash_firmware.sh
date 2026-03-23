@@ -6,7 +6,7 @@ PORT="${2:-}"
 BAUD="${3:-921600}"
 
 if [[ -z "$APP" || -z "$PORT" ]]; then
-  echo "usage: tools/flash_firmware.sh <bridge|pump_vfd> <port> [baud]"
+  echo "usage: tools/flash_firmware.sh <bridge|pump_vfd|pump_tpl> <port> [baud]"
   exit 2
 fi
 
