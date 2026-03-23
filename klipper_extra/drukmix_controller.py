@@ -42,7 +42,13 @@ class DrukMixController:
         self.stop_lookahead_s = config.getfloat(
             "pump_stop_lookahead_s", 3.0, minval=0.0
         )
+        self.prestart_mode = (
+            str(config.get("pump_prestart_mode", "fixed")).strip().lower()
+        )
         self.prestart_pct = config.getfloat("pump_prestart_pct", 18.0, minval=0.0)
+        self.prestart_min_pct = config.getfloat(
+            "pump_prestart_min_pct", 0.0, minval=0.0
+        )
         self.prestop_ramp_s = config.getfloat("pump_prestop_ramp_s", 0.0, minval=0.0)
         self.prestop_min_gap_s = config.getfloat(
             "pump_prestop_min_gap_s", 3.0, minval=0.0
@@ -282,9 +288,13 @@ class DrukMixController:
             # No active window; consider prestart/run_hold or idle.
             if t_start is not None and t_start <= self.start_lookahead_s:
                 semantic_state = "prestart"
-                target_pct = self.prestart_pct
+                if self.prestart_mode == "planned":
+                    target_pct = max(run_pct, self.prestart_min_pct)
+                    reason = "prestart_planned"
+                else:
+                    target_pct = self.prestart_pct
+                    reason = "prestart_fixed"
                 rev = False
-                reason = "prestart"
             elif (
                 self._last_state == "run"
                 and t_start is not None
