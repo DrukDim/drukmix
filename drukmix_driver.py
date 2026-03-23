@@ -103,7 +103,7 @@ def load_cfg(path: str) -> Cfg:
         fake_tau_up_s=_get_float(s, "fake_tau_up_s", 1.0),
         fake_tau_down_s=_get_float(s, "fake_tau_down_s", 0.8),
         fake_running_threshold_pct=_get_float(s, "fake_running_threshold_pct", 2.0),
-        update_hz=_get_float(s, "update_hz", 6.0),
+        update_hz=_get_float(s, "update_hz", 4.0),
         status_timeout_s=_get_float(s, "status_timeout_s", 2.0),
         ui_notify=get_bool("ui_notify", True),
         log_file=_get_str(
@@ -211,6 +211,12 @@ class MoonrakerClient:
         try:
             return self._notify_q.get_nowait()
         except asyncio.QueueEmpty:
+            return None
+
+    async def notify_next(self, timeout_s: float):
+        try:
+            return await asyncio.wait_for(self._notify_q.get(), timeout=timeout_s)
+        except asyncio.TimeoutError:
             return None
 
     async def respond(self, level: str, msg: str):
@@ -369,7 +375,9 @@ class Driver:
         backoff = 0.5
         while True:
             try:
-                await self._tick()
+                timeout_s = 1.0 / max(0.5, self.cfg.update_hz)
+                msg = await self.mr.notify_next(timeout_s=timeout_s)
+                await self._tick(msg)
                 backoff = 0.5
             except Exception as e:
                 self.log.error(f"driver loop error: {e}")
@@ -385,22 +393,17 @@ class Driver:
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2.0, 10.0)
 
-    async def _tick(self):
+    async def _tick(self, msg):
         now = time.monotonic()
 
-        # Drain notifications
-        for _ in range(500):
-            msg = self.mr.notify_nowait()
-            if not msg:
-                break
+        if msg:
             if msg.get("method") == "notify_status_update":
                 params = msg.get("params", [])
                 if params and isinstance(params[0], dict):
                     st0 = params[0].get("drukmix_controller")
                     if isinstance(st0, dict):
                         self._apply_controller_status(st0, now)
-                continue
-            if msg.get("method") == "notify_remote_method":
+            elif msg.get("method") == "notify_remote_method":
                 params = msg.get("params", [])
                 if params and isinstance(params[0], str):
                     rmethod = params[0]
@@ -410,7 +413,28 @@ class Driver:
                         else {}
                     )
                     await self._handle_remote(rmethod, rparams)
-                continue
+
+        # Drain any additional notifications immediately after the awaited event
+        while True:
+            extra = self.mr.notify_nowait()
+            if not extra:
+                break
+            if extra.get("method") == "notify_status_update":
+                params = extra.get("params", [])
+                if params and isinstance(params[0], dict):
+                    st0 = params[0].get("drukmix_controller")
+                    if isinstance(st0, dict):
+                        self._apply_controller_status(st0, now)
+            elif extra.get("method") == "notify_remote_method":
+                params = extra.get("params", [])
+                if params and isinstance(params[0], str):
+                    rmethod = params[0]
+                    rparams = (
+                        params[1]
+                        if len(params) > 1 and isinstance(params[1], dict)
+                        else {}
+                    )
+                    await self._handle_remote(rmethod, rparams)
 
         # Flush timeout
         if self.flush_until > 0.0 and now >= self.flush_until:
@@ -446,8 +470,6 @@ class Driver:
                 pct = max(0.0, min(100.0, float(self.status.target_pct)))
                 rev = bool(self.status.rev)
                 self.backend.set_auto_target_pct(pct, rev)
-
-        await asyncio.sleep(1.0 / max(0.5, self.cfg.update_hz))
 
 
 async def run_driver(cfg_path: str):
