@@ -21,13 +21,22 @@
 set -euo pipefail
 
 REPO_ROOT="${DRUKMIX_REPO_ROOT:-"$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"}"
-PRINTER_CFG_DIR="${PRINTER_CFG_DIR:-"$HOME/printer_data/config"}"
-KLIPPER_ROOT="${KLIPPER_ROOT:-"$HOME/klipper"}"
+RUN_AS_USER="${SUDO_USER:-$(id -un)}"
+if command -v getent >/dev/null 2>&1; then
+  USER_HOME="$(getent passwd "$RUN_AS_USER" | cut -d: -f6)"
+else
+  USER_HOME="$(eval echo "~$RUN_AS_USER")"
+fi
+if [[ -z "$USER_HOME" || ! -d "$USER_HOME" ]]; then
+  USER_HOME="$HOME"
+fi
+PRINTER_CFG_DIR="${PRINTER_CFG_DIR:-"$USER_HOME/printer_data/config"}"
+KLIPPER_ROOT="${KLIPPER_ROOT:-"$USER_HOME/klipper"}"
 KLIPPER_EXTRAS_DIR="${KLIPPER_EXTRAS_DIR:-"$KLIPPER_ROOT/klippy/extras"}"
 
 if [[ ! -d "$PRINTER_CFG_DIR" ]]; then
   for alt in \
-    "$HOME/printer_data/config" \
+    "$USER_HOME/printer_data/config" \
     "/home/klipper/printer_data/config" \
     "/home/pi/printer_data/config"
   do
