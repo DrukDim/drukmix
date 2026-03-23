@@ -156,6 +156,24 @@ Rules:
 - do not treat printer-side edits as canonical;
 - if runtime truth changes, commit it back into repo.
 
+Quickstart (Moonraker/Mainsail):
+1. Add an Update Manager entry for this repo (example):
+   ```
+   [update_manager drukmix]
+   type: git_repo
+   path: /home/drukos/drukmix
+   origin: <your-remote-url>
+   primary_branch: feature/hybrid-klipper-controller
+   post_update: /home/drukos/drukmix/tools/drukmix-setup --symlink-controller
+   ```
+   Adjust paths/user/branch as needed.
+2. After Update in Mainsail/Moonraker:
+   - Klipper: `systemctl restart klipper` (reloads the controller extra)
+   - Driver agent: start/restart your service or run `DRUKMIX_CONFIG=~/printer_data/config/drukmix_agent.cfg python3 /home/drukos/drukmix/drukmix_driver.py`
+3. If you want auto-start for the driver, run `tools/drukmix-setup --install-service` once (requires root). The service is optional and can be skipped on systems without systemd.
+
+This keeps updates reproducible: pull via Update Manager, run the setup helper, restart services, verify.
+
 ## Status
 
 Current verified state:
