@@ -253,14 +253,8 @@ if controller_cfg.exists():
     cp.read(controller_cfg)
     if cp.has_section("drukmix_controller"):
       pump_start_lookahead_s = cp.getfloat("drukmix_controller", "pump_start_lookahead_s", fallback=3.0)
-      host_buffer_target_s = cp.getfloat("drukmix_controller", "planner_probe_host_buffer_target_s", fallback=0.0)
-      print_velocity_epsilon = cp.getfloat("drukmix_controller", "planner_probe_print_velocity_epsilon", fallback=0.001)
-      print_gap_merge_s = cp.getfloat("drukmix_controller", "planner_probe_print_gap_merge_s", fallback=0.75)
   except Exception:
     pump_start_lookahead_s = 3.0
-    host_buffer_target_s = 0.0
-    print_velocity_epsilon = 0.001
-    print_gap_merge_s = 0.75
 
 if host_buffer_target_s <= 0.0:
   host_buffer_target_s = pump_start_lookahead_s
