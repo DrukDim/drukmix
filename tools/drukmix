@@ -224,6 +224,41 @@ print(f"normalized {p} with {needle}")
 PY
 }
 
+normalize_controller_cfg() {
+  CONTROLLER_CFG_DST="$CONTROLLER_CFG_DST" python3 - <<'PY'
+from pathlib import Path
+import os
+
+p = Path(os.environ["CONTROLLER_CFG_DST"])
+if not p.exists():
+    raise SystemExit(0)
+
+lines = p.read_text().splitlines()
+out = []
+for line in lines:
+    stripped = line.strip()
+    if not stripped:
+        out.append(line)
+        continue
+    if stripped.startswith("#"):
+        if "Planner probe tuning" in stripped or "planner_probe_" in stripped:
+            continue
+        out.append(line)
+        continue
+    key = stripped.split(":", 1)[0].split("=", 1)[0].strip()
+    if key in (
+        "planner_probe_host_buffer_target_s",
+        "planner_probe_print_velocity_epsilon",
+        "planner_probe_print_gap_merge_s",
+    ):
+        continue
+    out.append(line)
+
+p.write_text("\n".join(out) + "\n")
+print(f"normalized {p} without planner probe keys")
+PY
+}
+
 ensure_required_includes() {
   ensure_include_once "[include drukmix_controller.cfg]"
   ensure_include_once "[include drukmix_macros.cfg]"
@@ -452,6 +487,7 @@ do_install() {
   remove_file_if_present "$LEGACY_PLANNER_DST"
   rm -f "$KLIPPER_VEXT_DST"
   patch_cfg_if_needed
+  normalize_controller_cfg
   ensure_required_includes
   install_service
   install_bridge_udev_rule
@@ -482,6 +518,7 @@ do_update() {
   remove_file_if_present "$PRINTER_CFG_DIR/drukmix_planner.cfg"
   rm -f "$KLIPPER_VEXT_DST"
   patch_cfg_if_needed
+  normalize_controller_cfg
   ensure_required_includes
   install_service
   install_bridge_udev_rule
