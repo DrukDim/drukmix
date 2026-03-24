@@ -4,13 +4,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 USER_NAME="$(id -un)"
-USER_HOME="${HOME:-}"
+EFFECTIVE_USER="${SUDO_USER:-$USER_NAME}"
+USER_HOME=""
 
-if [[ -z "$USER_HOME" ]]; then
-  USER_HOME="$(getent passwd "$USER_NAME" | cut -d: -f6 || true)"
+if [[ -z "${SUDO_USER:-}" && -n "${HOME:-}" ]]; then
+  USER_HOME="$HOME"
 fi
 if [[ -z "$USER_HOME" ]]; then
-  USER_HOME="$(python3 -c 'import os,pwd; print(pwd.getpwuid(os.getuid()).pw_dir)')"
+  USER_HOME="$(getent passwd "$EFFECTIVE_USER" | cut -d: -f6 || true)"
+fi
+if [[ -z "$USER_HOME" ]]; then
+  USER_HOME="$(python3 -c "import pwd; print(pwd.getpwnam('${EFFECTIVE_USER}').pw_dir)")"
 fi
 if [[ -z "$USER_HOME" ]]; then
   echo "Cannot determine user home directory"
@@ -32,25 +36,12 @@ LEGACY_PLANNER_DST="$PRINTER_CFG_DIR/drukmix_planner.cfg"
 PRINTER_CFG="$PRINTER_CFG_DIR/printer.cfg"
 SERVICE_TEMPLATE="$REPO_DIR/systemd/drukmix.service"
 SERVICE_DST="/etc/systemd/system/drukmix.service"
-CLI_DST="${CLI_DST:-/usr/local/bin/drukmix}"
 
 KLIPPER_DIR="${KLIPPER_DIR:-$USER_HOME/klipper}"
 KLIPPER_EXTRA_SRC="$REPO_DIR/klipper_extra/drukmix_planner_probe.py"
 KLIPPER_EXTRA_DST="$KLIPPER_DIR/klippy/extras/drukmix_planner_probe.py"
 KLIPPER_CONTROLLER_SRC="$REPO_DIR/klipper_extra/drukmix_controller.py"
 KLIPPER_CONTROLLER_DST="$KLIPPER_DIR/klippy/extras/drukmix_controller.py"
-KLIPPER_VEXT_SRC="$REPO_DIR/klipper_extra/drukmix_virtual_extruder.py"
-KLIPPER_VEXT_DST="$KLIPPER_DIR/klippy/extras/drukmix_virtual_extruder.py"
-
-LAB_FAKE_BRIDGE_SCRIPT="$REPO_DIR/tools/lab/fake_bridge_pty.py"
-LAB_FAKE_BRIDGE_TTY_FILE="${LAB_FAKE_BRIDGE_TTY_FILE:-/tmp/drukmix_fake_bridge.tty}"
-LAB_FAKE_BRIDGE_LOG_FILE="${LAB_FAKE_BRIDGE_LOG_FILE:-/tmp/drukmix_fake_bridge.jsonl}"
-LAB_FAKE_BRIDGE_OUT_FILE="${LAB_FAKE_BRIDGE_OUT_FILE:-/tmp/drukmix_fake_bridge.out}"
-LAB_FAKE_BRIDGE_PID_FILE="${LAB_FAKE_BRIDGE_PID_FILE:-/tmp/drukmix_fake_bridge.pid}"
-LAB_PROBE_MEASURE_SCRIPT="$REPO_DIR/tools/lab/measure_probe_lead.py"
-LAB_PROBE_MEASURE_OUT="${LAB_PROBE_MEASURE_OUT:-/tmp/drukmix_probe_lead_report.json}"
-LAB_PROBE_MEASURE_DURATION_S="${LAB_PROBE_MEASURE_DURATION_S:-45}"
-LAB_PROBE_MEASURE_POLL_S="${LAB_PROBE_MEASURE_POLL_S:-0.10}"
 
 require_repo() {
   test -f "$REPO_DIR/drukmix_driver.py"
@@ -344,21 +335,7 @@ install_service() {
   sudo systemctl enable drukmix.service >/dev/null 2>&1 || true
 }
 
-install_cli_launcher() {
-  local rendered
-  rendered="$(mktemp)"
 
-  cat > "$rendered" <<EOF
-#!/usr/bin/env bash
-exec "$REPO_DIR/tools/drukmix" "\$@"
-EOF
-
-  sudo mkdir -p "$(dirname "$CLI_DST")"
-  sudo install -m 0755 "$rendered" "$CLI_DST"
-  rm -f "$rendered"
-
-  echo "installed command launcher: $CLI_DST -> $REPO_DIR/tools/drukmix"
-}
 
 restart_service() {
   sudo systemctl restart drukmix.service
@@ -447,10 +424,7 @@ install_klipper_extra_if_present() {
     install -m 0644 "$KLIPPER_CONTROLLER_SRC" "$KLIPPER_CONTROLLER_DST"
     echo "installed controller klipper extra: $KLIPPER_CONTROLLER_DST"
   fi
-  if [[ -f "$KLIPPER_VEXT_SRC" ]]; then
-    install -m 0644 "$KLIPPER_VEXT_SRC" "$KLIPPER_VEXT_DST"
-    echo "installed virtual extruder klipper extra: $KLIPPER_VEXT_DST"
-  fi
+
 }
 
 bridge_status() {
@@ -481,7 +455,6 @@ do_install() {
   remove_file_if_present "$LEGACY_PLANNER_DST"
   patch_cfg_if_needed
   ensure_required_includes
-  install_cli_launcher
   install_service
   install_bridge_udev_rule
   reload_udev_rules
@@ -511,7 +484,6 @@ do_update() {
   remove_file_if_present "$PRINTER_CFG_DIR/drukmix_planner.cfg"
   patch_cfg_if_needed
   ensure_required_includes
-  install_cli_launcher
   install_service
   install_bridge_udev_rule
   reload_udev_rules
@@ -530,7 +502,6 @@ do_purge() {
   sudo systemctl stop drukmix.service >/dev/null 2>&1 || true
   sudo systemctl disable drukmix.service >/dev/null 2>&1 || true
   sudo rm -f "$SERVICE_DST"
-  sudo rm -f "$CLI_DST"
   sudo systemctl daemon-reload
 
   rm -f "$MACROS_DST"
@@ -538,7 +509,7 @@ do_purge() {
   rm -f "$PRINTER_CFG_DIR/drukmix_research.cfg"
   rm -f "$KLIPPER_EXTRA_DST"
   rm -f "$KLIPPER_CONTROLLER_DST"
-  rm -f "$KLIPPER_VEXT_DST"
+
 
   remove_include_line "[include drukmix_controller.cfg]"
   remove_include_line "[include drukmix_macros.cfg]"
@@ -586,7 +557,7 @@ do_status() {
   echo "controller config: $CONTROLLER_CFG_DST"
   echo "macros: $MACROS_DST"
   echo "service: $SERVICE_DST"
-  echo "command launcher: $CLI_DST"
+
   echo "klipper dir: $KLIPPER_DIR"
   echo "planner klipper extra: $KLIPPER_EXTRA_DST"
   echo "controller klipper extra: $KLIPPER_CONTROLLER_DST"
@@ -634,10 +605,10 @@ do_doctor() {
   [[ -f "$MACROS_DST" ]] && echo "macros: ok ($MACROS_DST)" || echo "macros: missing ($MACROS_DST)"
   [[ -f "$LEGACY_PLANNER_DST" ]] && echo "legacy planner config: present ($LEGACY_PLANNER_DST)" || echo "legacy planner config: not used"
   [[ -f "$SERVICE_DST" ]] && echo "service file: ok ($SERVICE_DST)" || echo "service file: missing ($SERVICE_DST)"
-  [[ -x "$CLI_DST" ]] && echo "command launcher: ok ($CLI_DST)" || echo "command launcher: missing ($CLI_DST)"
+
   [[ -f "$KLIPPER_EXTRA_DST" ]] && echo "planner klipper extra: ok ($KLIPPER_EXTRA_DST)" || echo "planner klipper extra: missing ($KLIPPER_EXTRA_DST)"
   [[ -f "$KLIPPER_CONTROLLER_DST" ]] && echo "controller klipper extra: ok ($KLIPPER_CONTROLLER_DST)" || echo "controller klipper extra: missing ($KLIPPER_CONTROLLER_DST)"
-  [[ -f "$KLIPPER_VEXT_DST" ]] && echo "virtual extruder extra: ok ($KLIPPER_VEXT_DST)" || echo "virtual extruder extra: not installed (for lab/VM use only)"
+
 
   echo
   bridge_status
@@ -654,179 +625,7 @@ do_doctor() {
   echo
 }
 
-fake_bridge_pid() {
-  if [[ -f "$LAB_FAKE_BRIDGE_PID_FILE" ]]; then
-    cat "$LAB_FAKE_BRIDGE_PID_FILE" 2>/dev/null || true
-  fi
-}
-
-fake_bridge_running() {
-  local pid
-  pid="$(fake_bridge_pid)"
-  [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1
-}
-
-do_lab_fake_bridge_start() {
-  require_repo
-  ensure_venv
-
-  if [[ ! -f "$LAB_FAKE_BRIDGE_SCRIPT" ]]; then
-    echo "fake bridge script missing: $LAB_FAKE_BRIDGE_SCRIPT"
-    exit 2
-  fi
-
-  if fake_bridge_running; then
-    echo "fake bridge already running (pid=$(fake_bridge_pid))"
-    do_lab_fake_bridge_status
-    return 0
-  fi
-
-  nohup "$REPO_DIR/.venv/bin/python" "$LAB_FAKE_BRIDGE_SCRIPT" \
-    --write-tty-path "$LAB_FAKE_BRIDGE_TTY_FILE" \
-    --log-jsonl "$LAB_FAKE_BRIDGE_LOG_FILE" \
-    >"$LAB_FAKE_BRIDGE_OUT_FILE" 2>&1 < /dev/null &
-
-  local pid
-  pid="$!"
-  echo "$pid" > "$LAB_FAKE_BRIDGE_PID_FILE"
-
-  local n=0
-  while [[ $n -lt 40 ]]; do
-    if [[ -s "$LAB_FAKE_BRIDGE_TTY_FILE" ]]; then
-      break
-    fi
-    sleep 0.1
-    n=$((n+1))
-  done
-
-  echo "fake bridge started (pid=$pid)"
-  do_lab_fake_bridge_status
-}
-
-do_lab_fake_bridge_stop() {
-  local pid
-  pid="$(fake_bridge_pid)"
-  if [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1; then
-    kill "$pid" >/dev/null 2>&1 || true
-    sleep 0.2
-    if kill -0 "$pid" >/dev/null 2>&1; then
-      kill -9 "$pid" >/dev/null 2>&1 || true
-    fi
-    echo "stopped fake bridge pid=$pid"
-  else
-    echo "fake bridge not running"
-  fi
-  rm -f "$LAB_FAKE_BRIDGE_PID_FILE"
-}
-
-do_lab_fake_bridge_status() {
-  if fake_bridge_running; then
-    echo "fake bridge: running (pid=$(fake_bridge_pid))"
-  else
-    echo "fake bridge: stopped"
-  fi
-
-  if [[ -s "$LAB_FAKE_BRIDGE_TTY_FILE" ]]; then
-    echo "tty file: $LAB_FAKE_BRIDGE_TTY_FILE"
-    echo "tty path: $(cat "$LAB_FAKE_BRIDGE_TTY_FILE")"
-  else
-    echo "tty file: missing ($LAB_FAKE_BRIDGE_TTY_FILE)"
-  fi
-
-  [[ -f "$LAB_FAKE_BRIDGE_LOG_FILE" ]] && echo "event log: $LAB_FAKE_BRIDGE_LOG_FILE" || echo "event log: missing ($LAB_FAKE_BRIDGE_LOG_FILE)"
-  [[ -f "$LAB_FAKE_BRIDGE_OUT_FILE" ]] && echo "stdout log: $LAB_FAKE_BRIDGE_OUT_FILE" || echo "stdout log: missing ($LAB_FAKE_BRIDGE_OUT_FILE)"
-}
-
-do_lab_fake_bridge_link_cfg() {
-  require_paths
-
-  if [[ ! -s "$LAB_FAKE_BRIDGE_TTY_FILE" ]]; then
-    echo "tty file missing or empty: $LAB_FAKE_BRIDGE_TTY_FILE"
-    echo "start fake bridge first: ./tools/drukmix lab-fake-bridge-start"
-    exit 2
-  fi
-
-  local tty_path
-  tty_path="$(cat "$LAB_FAKE_BRIDGE_TTY_FILE")"
-  if [[ -z "$tty_path" ]]; then
-    echo "invalid tty path in: $LAB_FAKE_BRIDGE_TTY_FILE"
-    exit 2
-  fi
-
-  sed -i "s|^serial_port = .*|serial_port = ${tty_path}|" "$DRIVER_CFG_DST"
-  echo "linked driver config serial_port to fake bridge tty: $tty_path"
-  grep -n '^serial_port = ' "$DRIVER_CFG_DST" || true
-}
-
-do_lab_fake_bridge_report() {
-  if [[ ! -f "$LAB_FAKE_BRIDGE_LOG_FILE" ]]; then
-    echo "event log missing: $LAB_FAKE_BRIDGE_LOG_FILE"
-    exit 2
-  fi
-
-  python3 - "$LAB_FAKE_BRIDGE_LOG_FILE" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-total = 0
-set_flow = 0
-ping = 0
-first_ts = None
-last_ts = None
-last_target = None
-
-with open(path, "r", encoding="utf-8") as f:
-    for line in f:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            row = json.loads(line)
-        except Exception:
-            continue
-        total += 1
-        ts = row.get("ts_mono")
-        if isinstance(ts, (int, float)):
-            if first_ts is None:
-                first_ts = float(ts)
-            last_ts = float(ts)
-        ev = row.get("event")
-        if ev == "set_flow":
-            set_flow += 1
-            last_target = row.get("target_milli_lpm")
-        elif ev == "ping":
-            ping += 1
-
-print(f"log_file={path}")
-print(f"events_total={total}")
-print(f"events_set_flow={set_flow}")
-print(f"events_ping={ping}")
-if first_ts is not None and last_ts is not None:
-    print(f"window_s={last_ts-first_ts:.3f}")
-if last_target is not None:
-    print(f"last_target_milli_lpm={last_target}")
-PY
-}
-
-do_lab_probe_measure() {
-  require_repo
-  require_paths
-  ensure_venv
-
-  if [[ ! -f "$LAB_PROBE_MEASURE_SCRIPT" ]]; then
-    echo "probe measure script missing: $LAB_PROBE_MEASURE_SCRIPT"
-    exit 2
-  fi
-
-  "$REPO_DIR/.venv/bin/python" "$LAB_PROBE_MEASURE_SCRIPT" \
-    --moonraker-http "http://127.0.0.1:7125" \
-    --cfg "$CONTROLLER_CFG_DST" \
-    --bridge-log "$LAB_FAKE_BRIDGE_LOG_FILE" \
-    --duration-s "$LAB_PROBE_MEASURE_DURATION_S" \
-    --poll-s "$LAB_PROBE_MEASURE_POLL_S" \
-    --out-json "$LAB_PROBE_MEASURE_OUT"
-}
+# Lab helpers removed for production installer.
 
 do_cfg_reset() {
   require_repo
@@ -876,7 +675,7 @@ do_cfg_reset() {
 
 usage() {
   cat <<USAGE
-Usage: $0 <install|update|cfg-reset|purge|restart|status|logs|doctor|lab-fake-bridge-start|lab-fake-bridge-stop|lab-fake-bridge-status|lab-fake-bridge-link-cfg|lab-fake-bridge-report|lab-probe-measure>
+Usage: $0 <install|update|cfg-reset|purge|restart|status|logs|doctor>
 USAGE
 }
 
@@ -890,11 +689,5 @@ case "$cmd" in
   status) do_status ;;
   logs) do_logs ;;
   doctor) do_doctor ;;
-  lab-fake-bridge-start) do_lab_fake_bridge_start ;;
-  lab-fake-bridge-stop) do_lab_fake_bridge_stop ;;
-  lab-fake-bridge-status) do_lab_fake_bridge_status ;;
-  lab-fake-bridge-link-cfg) do_lab_fake_bridge_link_cfg ;;
-  lab-fake-bridge-report) do_lab_fake_bridge_report ;;
-  lab-probe-measure) do_lab_probe_measure ;;
   *) usage; exit 2 ;;
 esac
