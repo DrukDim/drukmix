@@ -178,9 +178,11 @@ s = p.read_text()
 repl = {
     "/home/dan/": user_home + "/",
     "/home/drukos/": user_home + "/",
+    "/root/": user_home + "/",
     "log_file = /var/log/drukmix/drukmix_driver.log": f"log_file = {log_file}",
     "log_file = /home/drukos/printer_data/logs/drukmix_driver.log": f"log_file = {log_file}",
     "log_file = /home/dan/printer_data/logs/drukmix_driver.log": f"log_file = {log_file}",
+    "log_file = /root/printer_data/logs/drukmix_driver.log": f"log_file = {log_file}",
 }
 
 for a, b in repl.items():
