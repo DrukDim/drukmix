@@ -42,6 +42,7 @@ KLIPPER_EXTRA_SRC="$REPO_DIR/klipper_extra/drukmix_planner_probe.py"
 KLIPPER_EXTRA_DST="$KLIPPER_DIR/klippy/extras/drukmix_planner_probe.py"
 KLIPPER_CONTROLLER_SRC="$REPO_DIR/klipper_extra/drukmix_controller.py"
 KLIPPER_CONTROLLER_DST="$KLIPPER_DIR/klippy/extras/drukmix_controller.py"
+KLIPPER_VEXT_DST="$KLIPPER_DIR/klippy/extras/drukmix_virtual_extruder.py"
 
 require_repo() {
   test -f "$REPO_DIR/drukmix_driver.py"
@@ -453,6 +454,7 @@ do_install() {
   install_macros_if_missing
   remove_file_if_present "$PRINTER_CFG_DIR/drukmix_research.cfg"
   remove_file_if_present "$LEGACY_PLANNER_DST"
+  rm -f "$KLIPPER_VEXT_DST"
   patch_cfg_if_needed
   ensure_required_includes
   install_service
@@ -482,6 +484,7 @@ do_update() {
   compile_check
   remove_file_if_present "$PRINTER_CFG_DIR/drukmix_research.cfg"
   remove_file_if_present "$PRINTER_CFG_DIR/drukmix_planner.cfg"
+  rm -f "$KLIPPER_VEXT_DST"
   patch_cfg_if_needed
   ensure_required_includes
   install_service
@@ -509,6 +512,7 @@ do_purge() {
   rm -f "$PRINTER_CFG_DIR/drukmix_research.cfg"
   rm -f "$KLIPPER_EXTRA_DST"
   rm -f "$KLIPPER_CONTROLLER_DST"
+  rm -f "$KLIPPER_VEXT_DST"
 
 
   remove_include_line "[include drukmix_controller.cfg]"
