@@ -20,10 +20,12 @@ fi
 PRINTER_CFG_DIR="${PRINTER_CFG_DIR:-$USER_HOME/printer_data/config}"
 PRINTER_LOG_DIR="${PRINTER_LOG_DIR:-$USER_HOME/printer_data/logs}"
 
-CFG_TEMPLATE="$REPO_DIR/config_examples/drukmix.cfg"
+DRIVER_CFG_TEMPLATE="$REPO_DIR/config_examples/drukmix_driver.cfg"
+CONTROLLER_CFG_TEMPLATE="$REPO_DIR/config_examples/drukmix_controller.cfg"
 MACROS_TEMPLATE="$REPO_DIR/config_examples/drukmix_macros.cfg"
 
-CFG_DST="$PRINTER_CFG_DIR/drukmix.cfg"
+DRIVER_CFG_DST="$PRINTER_CFG_DIR/drukmix_driver.cfg"
+CONTROLLER_CFG_DST="$PRINTER_CFG_DIR/drukmix_controller.cfg"
 MACROS_DST="$PRINTER_CFG_DIR/drukmix_macros.cfg"
 LEGACY_PLANNER_DST="$PRINTER_CFG_DIR/drukmix_planner.cfg"
 
@@ -35,6 +37,8 @@ CLI_DST="${CLI_DST:-/usr/local/bin/drukmix}"
 KLIPPER_DIR="${KLIPPER_DIR:-$USER_HOME/klipper}"
 KLIPPER_EXTRA_SRC="$REPO_DIR/klipper_extra/drukmix_planner_probe.py"
 KLIPPER_EXTRA_DST="$KLIPPER_DIR/klippy/extras/drukmix_planner_probe.py"
+KLIPPER_CONTROLLER_SRC="$REPO_DIR/klipper_extra/drukmix_controller.py"
+KLIPPER_CONTROLLER_DST="$KLIPPER_DIR/klippy/extras/drukmix_controller.py"
 KLIPPER_VEXT_SRC="$REPO_DIR/klipper_extra/drukmix_virtual_extruder.py"
 KLIPPER_VEXT_DST="$KLIPPER_DIR/klippy/extras/drukmix_virtual_extruder.py"
 
@@ -49,8 +53,9 @@ LAB_PROBE_MEASURE_DURATION_S="${LAB_PROBE_MEASURE_DURATION_S:-45}"
 LAB_PROBE_MEASURE_POLL_S="${LAB_PROBE_MEASURE_POLL_S:-0.10}"
 
 require_repo() {
-  test -f "$REPO_DIR/drukmix_agent.py"
-  test -f "$CFG_TEMPLATE"
+  test -f "$REPO_DIR/drukmix_driver.py"
+  test -f "$DRIVER_CFG_TEMPLATE"
+  test -f "$CONTROLLER_CFG_TEMPLATE"
   test -f "$MACROS_TEMPLATE"
   test -f "$SERVICE_TEMPLATE"
 }
@@ -98,7 +103,7 @@ ensure_venv() {
 
 compile_check() {
   "$REPO_DIR/.venv/bin/python" -m py_compile \
-    "$REPO_DIR/drukmix_agent.py" \
+    "$REPO_DIR/drukmix_driver.py" \
     "$REPO_DIR/backend/pump_backend_base.py" \
     "$REPO_DIR/backend/backend_pumpvfd.py" \
     "$REPO_DIR/backend/backend_pumptpl.py" \
@@ -108,11 +113,18 @@ compile_check() {
 }
 
 install_cfg_if_missing() {
-  if [[ ! -f "$CFG_DST" ]]; then
-    cp "$CFG_TEMPLATE" "$CFG_DST"
-    echo "Installed default config: $CFG_DST"
+  if [[ ! -f "$DRIVER_CFG_DST" ]]; then
+    cp "$DRIVER_CFG_TEMPLATE" "$DRIVER_CFG_DST"
+    echo "Installed default driver config: $DRIVER_CFG_DST"
   else
-    echo "Keeping existing config: $CFG_DST"
+    echo "Keeping existing driver config: $DRIVER_CFG_DST"
+  fi
+
+  if [[ ! -f "$CONTROLLER_CFG_DST" ]]; then
+    cp "$CONTROLLER_CFG_TEMPLATE" "$CONTROLLER_CFG_DST"
+    echo "Installed default controller config: $CONTROLLER_CFG_DST"
+  else
+    echo "Keeping existing controller config: $CONTROLLER_CFG_DST"
   fi
 }
 
@@ -160,32 +172,27 @@ PY2
 }
 
 patch_cfg_if_needed() {
-  CFG_DST="$CFG_DST" USER_HOME="$USER_HOME" PRINTER_LOG_DIR="$PRINTER_LOG_DIR" python3 - <<'PY'
+  DRIVER_CFG_DST="$DRIVER_CFG_DST" USER_HOME="$USER_HOME" PRINTER_LOG_DIR="$PRINTER_LOG_DIR" python3 - <<'PY'
 from pathlib import Path
 import os
 
-p = Path(os.environ["CFG_DST"])
+p = Path(os.environ["DRIVER_CFG_DST"])
 user_home = os.environ["USER_HOME"]
 log_dir = os.environ["PRINTER_LOG_DIR"]
-log_file = f"{log_dir}/drukmix.log"
+log_file = f"{log_dir}/drukmix_driver.log"
 
 s = p.read_text()
 
 repl = {
     "/home/dan/": user_home + "/",
     "/home/drukos/": user_home + "/",
-    "printer_cfg = /home/dan/printer_data/config/printer.cfg": f"printer_cfg = {user_home}/printer_data/config/printer.cfg",
-    "printer_cfg = /home/drukos/printer_data/config/printer.cfg": f"printer_cfg = {user_home}/printer_data/config/printer.cfg",
-    "log_file = /var/log/drukmix/drukmix.log": f"log_file = {log_file}",
-    "log_file = /home/drukos/printer_data/logs/drukmix.log": f"log_file = {log_file}",
-    "log_file = /home/dan/printer_data/logs/drukmix.log": f"log_file = {log_file}",
+    "log_file = /var/log/drukmix/drukmix_driver.log": f"log_file = {log_file}",
+    "log_file = /home/drukos/printer_data/logs/drukmix_driver.log": f"log_file = {log_file}",
+    "log_file = /home/dan/printer_data/logs/drukmix_driver.log": f"log_file = {log_file}",
 }
 
 for a, b in repl.items():
     s = s.replace(a, b)
-
-if "printer_cfg =" not in s:
-    s += f"\nprinter_cfg = {user_home}/printer_data/config/printer.cfg\n"
 
 if "log_file =" not in s:
     s += f"\nlog_file = {log_file}\n"
@@ -224,6 +231,7 @@ PY
 }
 
 ensure_required_includes() {
+  ensure_include_once "[include drukmix_controller.cfg]"
   ensure_include_once "[include drukmix_macros.cfg]"
   remove_include_line "[include drukmix_research.cfg]"
   remove_include_line "[include drukmix_planner.cfg]"
@@ -231,7 +239,7 @@ ensure_required_includes() {
 }
 
 ensure_planner_probe_section() {
-  PRINTER_CFG="$PRINTER_CFG" CFG_DST="$CFG_DST" python3 - <<'PY'
+  PRINTER_CFG="$PRINTER_CFG" CONTROLLER_CFG_DST="$CONTROLLER_CFG_DST" python3 - <<'PY'
 from pathlib import Path
 import os
 import re
@@ -240,28 +248,33 @@ import configparser
 p = Path(os.environ["PRINTER_CFG"])
 s = p.read_text()
 
-cfg_dst = Path(os.environ.get("CFG_DST", ""))
-host_buffer_target_s = 4.0
+controller_cfg = Path(os.environ.get("CONTROLLER_CFG_DST", ""))
+pump_start_lookahead_s = 3.0
+host_buffer_target_s = 0.0
 print_velocity_epsilon = 0.001
 print_gap_merge_s = 0.75
-if cfg_dst.exists():
+if controller_cfg.exists():
   cp = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
   try:
-    cp.read(cfg_dst)
-    if cp.has_section("drukmix"):
-      pump_start_lookahead_s = cp.getfloat("drukmix", "pump_start_lookahead_s", fallback=4.0)
-      host_buffer_target_s = cp.getfloat("drukmix", "planner_probe_host_buffer_target_s", fallback=0.0)
-      if host_buffer_target_s <= 0.0:
-        host_buffer_target_s = pump_start_lookahead_s
-      print_velocity_epsilon = cp.getfloat("drukmix", "planner_probe_print_velocity_epsilon", fallback=0.001)
-      print_gap_merge_s = cp.getfloat("drukmix", "planner_probe_print_gap_merge_s", fallback=0.75)
+    cp.read(controller_cfg)
+    if cp.has_section("drukmix_controller"):
+      pump_start_lookahead_s = cp.getfloat("drukmix_controller", "pump_start_lookahead_s", fallback=3.0)
+      host_buffer_target_s = cp.getfloat("drukmix_controller", "planner_probe_host_buffer_target_s", fallback=0.0)
+      print_velocity_epsilon = cp.getfloat("drukmix_controller", "planner_probe_print_velocity_epsilon", fallback=0.001)
+      print_gap_merge_s = cp.getfloat("drukmix_controller", "planner_probe_print_gap_merge_s", fallback=0.75)
   except Exception:
-    host_buffer_target_s = 4.0
+    pump_start_lookahead_s = 3.0
+    host_buffer_target_s = 0.0
     print_velocity_epsilon = 0.001
     print_gap_merge_s = 0.75
+
+if host_buffer_target_s <= 0.0:
+  host_buffer_target_s = pump_start_lookahead_s
+
 host_buffer_target_s = max(0.0, min(30.0, float(host_buffer_target_s)))
 print_velocity_epsilon = max(0.0, min(0.1, float(print_velocity_epsilon)))
 print_gap_merge_s = max(0.0, min(30.0, float(print_gap_merge_s)))
+
 
 begin = "# --- drukmix planner probe (managed): begin ---"
 end = "# --- drukmix planner probe (managed): end ---"
@@ -321,7 +334,8 @@ install_service() {
   sed \
     -e "s|^User=.*$|User=${USER_NAME}|" \
     -e "s|^WorkingDirectory=.*$|WorkingDirectory=${REPO_DIR}|" \
-    -e "s|^ExecStart=.*$|ExecStart=${REPO_DIR}/.venv/bin/python ${REPO_DIR}/drukmix_agent.py --config ${PRINTER_CFG_DIR}/drukmix.cfg|" \
+    -e "s|^Environment=.*$|Environment=DRUKMIX_CONFIG=${PRINTER_CFG_DIR}/drukmix_driver.cfg|" \
+    -e "s|^ExecStart=.*$|ExecStart=${REPO_DIR}/.venv/bin/python ${REPO_DIR}/drukmix_driver.py|" \
     "$SERVICE_TEMPLATE" > "$rendered"
 
   sudo install -m 0644 "$rendered" "$SERVICE_DST"
@@ -429,6 +443,10 @@ install_klipper_extra_if_present() {
 
   install -m 0644 "$KLIPPER_EXTRA_SRC" "$KLIPPER_EXTRA_DST"
   echo "installed planner klipper extra: $KLIPPER_EXTRA_DST"
+  if [[ -f "$KLIPPER_CONTROLLER_SRC" ]]; then
+    install -m 0644 "$KLIPPER_CONTROLLER_SRC" "$KLIPPER_CONTROLLER_DST"
+    echo "installed controller klipper extra: $KLIPPER_CONTROLLER_DST"
+  fi
   if [[ -f "$KLIPPER_VEXT_SRC" ]]; then
     install -m 0644 "$KLIPPER_VEXT_SRC" "$KLIPPER_VEXT_DST"
     echo "installed virtual extruder klipper extra: $KLIPPER_VEXT_DST"
@@ -519,8 +537,10 @@ do_purge() {
   rm -f "$PRINTER_CFG_DIR/drukmix_planner.cfg"
   rm -f "$PRINTER_CFG_DIR/drukmix_research.cfg"
   rm -f "$KLIPPER_EXTRA_DST"
+  rm -f "$KLIPPER_CONTROLLER_DST"
   rm -f "$KLIPPER_VEXT_DST"
 
+  remove_include_line "[include drukmix_controller.cfg]"
   remove_include_line "[include drukmix_macros.cfg]"
   remove_include_line "[include drukmix_research.cfg]"
   remove_include_line "[include drukmix_planner.cfg]"
@@ -530,7 +550,8 @@ do_purge() {
   echo "Purge completed."
   echo "Kept repo: $REPO_DIR"
   echo "Kept venv: $REPO_DIR/.venv"
-  echo "Kept config: $CFG_DST"
+  echo "Kept driver config: $DRIVER_CFG_DST"
+  echo "Kept controller config: $CONTROLLER_CFG_DST"
   echo "Removed live macros file: $MACROS_DST"
   echo "Removed managed planner-probe section from printer.cfg"
 }
@@ -561,12 +582,14 @@ do_status() {
   echo "== paths =="
   echo "printer cfg dir: $PRINTER_CFG_DIR"
   echo "printer log dir: $PRINTER_LOG_DIR"
-  echo "config: $CFG_DST"
+  echo "driver config: $DRIVER_CFG_DST"
+  echo "controller config: $CONTROLLER_CFG_DST"
   echo "macros: $MACROS_DST"
   echo "service: $SERVICE_DST"
   echo "command launcher: $CLI_DST"
   echo "klipper dir: $KLIPPER_DIR"
   echo "planner klipper extra: $KLIPPER_EXTRA_DST"
+  echo "controller klipper extra: $KLIPPER_CONTROLLER_DST"
 
   echo
   echo "== service =="
@@ -585,12 +608,15 @@ do_status() {
   echo
 
   echo
-  echo "== config preview =="
-  sed -n '1,220p' "$CFG_DST" || true
+  echo "== config preview (driver) =="
+  sed -n '1,220p' "$DRIVER_CFG_DST" || true
+  echo
+  echo "== config preview (controller) =="
+  sed -n '1,220p' "$CONTROLLER_CFG_DST" || true
 }
 
 do_logs() {
-  tail -n 200 -F "$PRINTER_LOG_DIR/drukmix.log"
+  tail -n 200 -F "$PRINTER_LOG_DIR/drukmix_driver.log"
 }
 
 do_doctor() {
@@ -602,13 +628,15 @@ do_doctor() {
   command -v getent >/dev/null 2>&1 && echo "getent: ok" || echo "getent: missing (fallbacks still exist)"
   command -v udevadm >/dev/null 2>&1 && echo "udevadm: ok" || echo "udevadm: missing"
   [[ -x "$REPO_DIR/.venv/bin/python" ]] && echo "venv: ok" || echo "venv: missing"
-  [[ -f "$CFG_DST" ]] && echo "config: ok ($CFG_DST)" || echo "config: missing ($CFG_DST)"
+  [[ -f "$DRIVER_CFG_DST" ]] && echo "driver config: ok ($DRIVER_CFG_DST)" || echo "driver config: missing ($DRIVER_CFG_DST)"
+  [[ -f "$CONTROLLER_CFG_DST" ]] && echo "controller config: ok ($CONTROLLER_CFG_DST)" || echo "controller config: missing ($CONTROLLER_CFG_DST)"
   [[ -f "$PRINTER_CFG" ]] && echo "printer.cfg: ok ($PRINTER_CFG)" || echo "printer.cfg: missing ($PRINTER_CFG)"
   [[ -f "$MACROS_DST" ]] && echo "macros: ok ($MACROS_DST)" || echo "macros: missing ($MACROS_DST)"
   [[ -f "$LEGACY_PLANNER_DST" ]] && echo "legacy planner config: present ($LEGACY_PLANNER_DST)" || echo "legacy planner config: not used"
   [[ -f "$SERVICE_DST" ]] && echo "service file: ok ($SERVICE_DST)" || echo "service file: missing ($SERVICE_DST)"
   [[ -x "$CLI_DST" ]] && echo "command launcher: ok ($CLI_DST)" || echo "command launcher: missing ($CLI_DST)"
   [[ -f "$KLIPPER_EXTRA_DST" ]] && echo "planner klipper extra: ok ($KLIPPER_EXTRA_DST)" || echo "planner klipper extra: missing ($KLIPPER_EXTRA_DST)"
+  [[ -f "$KLIPPER_CONTROLLER_DST" ]] && echo "controller klipper extra: ok ($KLIPPER_CONTROLLER_DST)" || echo "controller klipper extra: missing ($KLIPPER_CONTROLLER_DST)"
   [[ -f "$KLIPPER_VEXT_DST" ]] && echo "virtual extruder extra: ok ($KLIPPER_VEXT_DST)" || echo "virtual extruder extra: not installed (for lab/VM use only)"
 
   echo
@@ -725,9 +753,9 @@ do_lab_fake_bridge_link_cfg() {
     exit 2
   fi
 
-  sed -i "s|^serial_port = .*|serial_port = ${tty_path}|" "$CFG_DST"
-  echo "linked config serial_port to fake bridge tty: $tty_path"
-  grep -n '^serial_port = ' "$CFG_DST" || true
+  sed -i "s|^serial_port = .*|serial_port = ${tty_path}|" "$DRIVER_CFG_DST"
+  echo "linked driver config serial_port to fake bridge tty: $tty_path"
+  grep -n '^serial_port = ' "$DRIVER_CFG_DST" || true
 }
 
 do_lab_fake_bridge_report() {
@@ -793,7 +821,7 @@ do_lab_probe_measure() {
 
   "$REPO_DIR/.venv/bin/python" "$LAB_PROBE_MEASURE_SCRIPT" \
     --moonraker-http "http://127.0.0.1:7125" \
-    --cfg "$CFG_DST" \
+    --cfg "$CONTROLLER_CFG_DST" \
     --bridge-log "$LAB_FAKE_BRIDGE_LOG_FILE" \
     --duration-s "$LAB_PROBE_MEASURE_DURATION_S" \
     --poll-s "$LAB_PROBE_MEASURE_POLL_S" \
@@ -804,30 +832,41 @@ do_cfg_reset() {
   require_repo
   require_paths
 
-  if [[ ! -f "$CFG_DST" ]]; then
-    echo "Config not found: $CFG_DST"
+  if [[ ! -f "$DRIVER_CFG_DST" ]]; then
+    echo "Driver config not found: $DRIVER_CFG_DST"
+    echo "Run install first."
+    exit 2
+  fi
+  if [[ ! -f "$CONTROLLER_CFG_DST" ]]; then
+    echo "Controller config not found: $CONTROLLER_CFG_DST"
     echo "Run install first."
     exit 2
   fi
 
-  local ts cfg_backup macros_backup
+  local ts driver_backup controller_backup macros_backup
   ts="$(date +%Y%m%d_%H%M%S)"
 
-  cfg_backup="$CFG_DST.bak.$ts"
-  cp "$CFG_DST" "$cfg_backup"
+  driver_backup="$DRIVER_CFG_DST.bak.$ts"
+  cp "$DRIVER_CFG_DST" "$driver_backup"
+
+  controller_backup="$CONTROLLER_CFG_DST.bak.$ts"
+  cp "$CONTROLLER_CFG_DST" "$controller_backup"
 
   if [[ -f "$MACROS_DST" ]]; then
     macros_backup="$MACROS_DST.bak.$ts"
     cp "$MACROS_DST" "$macros_backup"
   fi
 
-  cp "$CFG_TEMPLATE" "$CFG_DST"
+  cp "$DRIVER_CFG_TEMPLATE" "$DRIVER_CFG_DST"
+  cp "$CONTROLLER_CFG_TEMPLATE" "$CONTROLLER_CFG_DST"
   cp "$MACROS_TEMPLATE" "$MACROS_DST"
   patch_cfg_if_needed
 
-  echo "Reset config from template: $CFG_TEMPLATE -> $CFG_DST"
+  echo "Reset driver config from template: $DRIVER_CFG_TEMPLATE -> $DRIVER_CFG_DST"
+  echo "Reset controller config from template: $CONTROLLER_CFG_TEMPLATE -> $CONTROLLER_CFG_DST"
   echo "Reset macros from template: $MACROS_TEMPLATE -> $MACROS_DST"
-  echo "Config backup saved: $cfg_backup"
+  echo "Driver config backup saved: $driver_backup"
+  echo "Controller config backup saved: $controller_backup"
   if [[ -n "${macros_backup:-}" ]]; then
     echo "Macros backup saved: $macros_backup"
   else

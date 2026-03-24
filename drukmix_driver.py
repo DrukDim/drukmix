@@ -30,7 +30,7 @@ CONTROLLER_FIELDS = [
     "stale",
 ]
 
-DEFAULT_CFG_PATH = os.path.expanduser("~/printer_data/config/drukmix_agent.cfg")
+DEFAULT_CFG_PATH = os.path.expanduser("~/printer_data/config/drukmix_driver.cfg")
 
 
 @dataclasses.dataclass
@@ -83,7 +83,7 @@ def load_cfg(path: str) -> Cfg:
     cp = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
     if not cp.read(path):
         raise FileNotFoundError(path)
-    s = cp["drukmix_agent"]
+    s = cp["drukmix_driver"]
 
     def get_bool(k: str, d: bool = False) -> bool:
         raw = _strip_inline_comment(s.get(k, str(d))).lower()

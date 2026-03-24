@@ -1,5 +1,5 @@
 [Unit]
-Description=DrukMix agent
+Description=DrukMix driver
 After=network-online.target moonraker.service
 Wants=network-online.target
 Requires=moonraker.service
@@ -8,7 +8,8 @@ Requires=moonraker.service
 Type=simple
 User=drukos
 WorkingDirectory=/home/drukos/drukmix
-ExecStart=/home/drukos/drukmix/.venv/bin/python /home/drukos/drukmix/drukmix_agent.py --config /home/drukos/printer_data/config/drukmix.cfg
+Environment=DRUKMIX_CONFIG=/home/drukos/printer_data/config/drukmix_driver.cfg
+ExecStart=/home/drukos/drukmix/.venv/bin/python /home/drukos/drukmix/drukmix_driver.py
 Restart=always
 RestartSec=2
 Nice=5

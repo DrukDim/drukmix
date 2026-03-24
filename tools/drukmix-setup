@@ -2,15 +2,15 @@
 #
 # DrukMix setup helper
 # - Installs Klipper extra `drukmix_controller.py` into klippy/extras
-# - Copies example configs (controller, macros, agent) if missing
+# - Copies example configs (controller, macros, driver) if missing
 # - Adds printer.cfg includes if missing
-# - (Optional) installs a systemd service for the driver agent
+# - (Optional) installs a systemd service for the driver
 #
 # Defaults can be overridden via env:
 #   PRINTER_CFG_DIR   (default: $HOME/printer_data/config)
 #   KLIPPER_ROOT      (default: $HOME/klipper)
 #   DRUKMIX_REPO_ROOT (default: parent of this script)
-#   DRUKMIX_CONFIG    (agent cfg path; default: $PRINTER_CFG_DIR/drukmix_agent.cfg)
+#   DRUKMIX_CONFIG    (driver cfg path; default: $PRINTER_CFG_DIR/drukmix_driver.cfg)
 #
 # Usage:
 #   ./tools/drukmix-setup [--force] [--install-service]
@@ -57,8 +57,8 @@ MACROS_DST="${PRINTER_CFG_DIR}/drukmix_macros.cfg"
 CTRL_CFG_SRC="${REPO_ROOT}/config_examples/drukmix_controller.cfg"
 CTRL_CFG_DST="${PRINTER_CFG_DIR}/drukmix_controller.cfg"
 
-AGENT_CFG_SRC="${REPO_ROOT}/config_examples/drukmix_agent.cfg"
-AGENT_CFG_DST="${DRUKMIX_CONFIG:-"$PRINTER_CFG_DIR/drukmix_agent.cfg"}"
+DRIVER_CFG_SRC="${REPO_ROOT}/config_examples/drukmix_driver.cfg"
+DRIVER_CFG_DST="${DRUKMIX_CONFIG:-"$PRINTER_CFG_DIR/drukmix_driver.cfg"}"
 
 SERVICE_NAME="drukmix.service"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}"
@@ -67,16 +67,17 @@ AGENT_BIN="${REPO_ROOT}/drukmix_driver.py"
 FORCE=0
 INSTALL_SERVICE=0
 SYMLINK_CONTROLLER=0
-FORCE_AGENT_CFG=0
+FORCE_DRIVER_CFG=0
 
 log() { printf "[drukmix-setup] %s\n" "$*" >&2; }
 die() { log "ERROR: $*"; exit 1; }
 
 usage() {
   cat >&2 <<EOF
-Usage: $0 [--force] [--force-agent-cfg] [--symlink-controller] [--install-service] [--help]
+Usage: $0 [--force] [--force-driver-cfg] [--force-agent-cfg] [--symlink-controller] [--install-service] [--help]
   --force               overwrite existing files (configs/unit/controller/unit)
-  --force-agent-cfg      overwrite existing drukmix_agent.cfg
+  --force-driver-cfg     overwrite existing drukmix_driver.cfg
+  --force-agent-cfg      legacy alias for --force-driver-cfg
   --symlink-controller  place controller as symlink into klippy/extras
   --install-service     install systemd service for drukmix driver
   --help                show this help
@@ -88,8 +89,11 @@ while [ $# -gt 0 ]; do
     --force)
       FORCE=1
       ;;
+    --force-driver-cfg)
+      FORCE_DRIVER_CFG=1
+      ;;
     --force-agent-cfg)
-      FORCE_AGENT_CFG=1
+      FORCE_DRIVER_CFG=1
       ;;
     --symlink-controller)
       SYMLINK_CONTROLLER=1
@@ -168,10 +172,10 @@ install_controller() {
 install_configs() {
   copy_if_missing "$MACROS_SRC" "$MACROS_DST"
   copy_if_missing "$CTRL_CFG_SRC" "$CTRL_CFG_DST"
-  if [[ -e "$AGENT_CFG_DST" && $FORCE_AGENT_CFG -eq 0 ]]; then
-    log "skip (exists): $AGENT_CFG_DST"
+  if [[ -e "$DRIVER_CFG_DST" && $FORCE_DRIVER_CFG -eq 0 ]]; then
+    log "skip (exists): $DRIVER_CFG_DST"
   else
-    copy_if_missing "$AGENT_CFG_SRC" "$AGENT_CFG_DST"
+    copy_if_missing "$DRIVER_CFG_SRC" "$DRIVER_CFG_DST"
   fi
   append_include_if_missing "[include $(basename "$CTRL_CFG_DST")]" "$PRINTER_CFG_PATH"
   append_include_if_missing "[include $(basename "$MACROS_DST")]" "$PRINTER_CFG_PATH"
@@ -187,13 +191,13 @@ install_service() {
     log "not root; skipping service install (rerun with sudo or install manually)"
     return
   fi
-  local cfg_path="$AGENT_CFG_DST"
+  local cfg_path="$DRIVER_CFG_DST"
   local python_bin="/usr/bin/python3"
   if [[ -x "${REPO_ROOT}/.venv/bin/python" ]]; then
     python_bin="${REPO_ROOT}/.venv/bin/python"
   fi
   local unit_content="[Unit]
-Description=DrukMix driver agent
+Description=DrukMix driver
 After=network-online.target moonraker.service
 Wants=network-online.target
 
@@ -230,7 +234,7 @@ main() {
   if [[ $INSTALL_SERVICE -eq 1 ]]; then
     log "  - start driver: sudo systemctl start ${SERVICE_NAME}"
   else
-    log "  - run driver manually: DRUKMIX_CONFIG=${AGENT_CFG_DST} python3 ${AGENT_BIN}"
+    log "  - run driver manually: DRUKMIX_CONFIG=${DRIVER_CFG_DST} python3 ${AGENT_BIN}"
   fi
 }
 
