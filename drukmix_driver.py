@@ -37,6 +37,10 @@ DEFAULT_CFG_PATH = os.path.expanduser("~/printer_data/config/drukmix_driver.cfg"
 class Cfg:
     enabled: bool
     moonraker_ws: str
+    client_name: str
+    client_version: str
+    client_type: str
+    client_url: str
     backend: str
     transport: str
     serial_port: str
@@ -92,6 +96,10 @@ def load_cfg(path: str) -> Cfg:
     return Cfg(
         enabled=get_bool("enabled", True),
         moonraker_ws=_get_str(s, "moonraker_ws", "ws://127.0.0.1:7125/websocket"),
+        client_name=_get_str(s, "client_name", "drukmix_driver"),
+        client_version=_get_str(s, "client_version", "1.0"),
+        client_type=_get_str(s, "client_type", "agent"),
+        client_url=_get_str(s, "client_url", "http://127.0.0.1"),
         backend=_get_str(s, "backend", "pumpvfd"),
         transport=_get_str(s, "transport", "usb").lower(),
         serial_port=_get_str(s, "serial_port", "/dev/drukos-bridge"),
@@ -139,8 +147,19 @@ def setup_logger(log_file: str, log_level: str = "info") -> logging.Logger:
 
 
 class MoonrakerClient:
-    def __init__(self, ws_url: str):
+    def __init__(
+        self,
+        ws_url: str,
+        client_name: str,
+        client_version: str,
+        client_type: str,
+        client_url: str,
+    ):
         self.ws_url = ws_url
+        self.client_name = client_name
+        self.client_version = client_version
+        self.client_type = client_type
+        self.client_url = client_url
         self._ws = None
         self._id = 1
         self._pending: Dict[int, asyncio.Future] = {}
@@ -157,9 +176,10 @@ class MoonrakerClient:
         await self.call(
             "server.connection.identify",
             {
-                "client_name": "drukmix_driver",
-                "version": "1.0",
-                "type": "agent",
+                "client_name": self.client_name,
+                "version": self.client_version,
+                "type": self.client_type,
+                "url": self.client_url,
             },
         )
 
@@ -276,7 +296,13 @@ class Driver:
             self.backend = PumpVfdBackend(transport)
 
         self.backend.open()
-        self.mr = MoonrakerClient(self.cfg.moonraker_ws)
+        self.mr = MoonrakerClient(
+            self.cfg.moonraker_ws,
+            self.cfg.client_name,
+            self.cfg.client_version,
+            self.cfg.client_type,
+            self.cfg.client_url,
+        )
         await self.mr.connect()
 
         await self._register_methods()
