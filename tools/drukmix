@@ -191,6 +191,15 @@ for a, b in repl.items():
 if "log_file =" not in s:
     s += f"\nlog_file = {log_file}\n"
 
+if "client_name =" not in s:
+    s += "\nclient_name = drukmix_driver\n"
+if "client_version =" not in s:
+    s += "client_version = 1.0\n"
+if "client_type =" not in s:
+    s += "client_type = agent\n"
+if "client_url =" not in s:
+    s += "client_url = http://127.0.0.1\n"
+
 p.write_text(s)
 print(f"patched {p}")
 PY
