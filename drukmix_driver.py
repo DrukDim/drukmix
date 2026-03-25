@@ -154,6 +154,14 @@ class MoonrakerClient:
             self.ws_url, ping_interval=20, ping_timeout=20
         )
         self._reader_task = asyncio.create_task(self._reader_loop())
+        await self.call(
+            "server.connection.identify",
+            {
+                "client_name": "drukmix_driver",
+                "version": "1.0",
+                "type": "agent",
+            },
+        )
 
     async def close(self):
         self._closed = True
