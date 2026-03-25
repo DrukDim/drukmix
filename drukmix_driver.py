@@ -277,6 +277,7 @@ class Driver:
         self.flush_rev: bool = False
         self.status = ControllerStatus()
         self._last_debug_t: float = 0.0
+        self._subscribed: bool = False
 
     async def start(self):
         if self.cfg.transport == "fake":
@@ -306,8 +307,8 @@ class Driver:
         await self.mr.connect()
 
         await self._register_methods()
-        await self._subscribe_controller()
-        await self._initial_query()
+        if await self._subscribe_controller():
+            await self._initial_query()
 
         await self._loop()
 
@@ -327,11 +328,19 @@ class Driver:
                 # Compatibility: ignore if not supported
                 break
 
-    async def _subscribe_controller(self):
-        await self.mr.call(
-            "printer.objects.subscribe",
-            {"objects": {"drukmix_controller": CONTROLLER_FIELDS}},
-        )
+    async def _subscribe_controller(self) -> bool:
+        try:
+            await self.mr.call(
+                "printer.objects.subscribe",
+                {"objects": {"drukmix_controller": CONTROLLER_FIELDS}},
+            )
+            self._subscribed = True
+            self.log.info("drukmix_driver subscribed to drukmix_controller")
+            return True
+        except Exception as e:
+            self._subscribed = False
+            self.log.warning(f"drukmix_driver subscribe failed: {e}")
+            return False
 
     async def _initial_query(self):
         try:
@@ -437,6 +446,15 @@ class Driver:
                     st0 = params[0].get("drukmix_controller")
                     if isinstance(st0, dict):
                         self._apply_controller_status(st0, now)
+            elif msg.get("method") == "notify_klippy_ready":
+                self.log.info("drukmix_driver: klippy ready")
+                if await self._subscribe_controller():
+                    await self._initial_query()
+            elif msg.get("method") == "notify_klippy_disconnected":
+                self.log.warning("drukmix_driver: klippy disconnected")
+                self.status.available = False
+                self.status.stale = True
+                self.status.last_t = now
             elif msg.get("method") == "notify_remote_method":
                 params = msg.get("params", [])
                 if params and isinstance(params[0], str):
@@ -459,6 +477,15 @@ class Driver:
                     st0 = params[0].get("drukmix_controller")
                     if isinstance(st0, dict):
                         self._apply_controller_status(st0, now)
+            elif extra.get("method") == "notify_klippy_ready":
+                self.log.info("drukmix_driver: klippy ready")
+                if await self._subscribe_controller():
+                    await self._initial_query()
+            elif extra.get("method") == "notify_klippy_disconnected":
+                self.log.warning("drukmix_driver: klippy disconnected")
+                self.status.available = False
+                self.status.stale = True
+                self.status.last_t = now
             elif extra.get("method") == "notify_remote_method":
                 params = extra.get("params", [])
                 if params and isinstance(params[0], str):
