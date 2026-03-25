@@ -192,11 +192,17 @@ bool PumpVfdNode::set_flow(int32_t target_milli_lpm) {
 }
 
 bool PumpVfdNode::stop() {
-  bool ok = vfd_.set_stop_ramp();
-  status_.running = false;
   status_.target_milli_lpm = 0;
   status_.cmd_setpoint_raw = 0;
-  return ok;
+  // Zero target is host-controlled semantics. Do not invent a separate local
+  // ramp policy in the ESP node: first drive the commanded frequency to zero,
+  // then issue the backend stop command.
+  bool ok_freq = vfd_.set_frequency_pct_x100(0);
+  bool ok_stop = vfd_.set_stop_ramp();
+
+  // Do not force running=false here; let poll_status() report when the VFD
+  // has actually decelerated to a stop.
+  return ok_freq && ok_stop;
 }
 
 bool PumpVfdNode::reset_fault() {
