@@ -440,22 +440,23 @@ class Driver:
         now = time.monotonic()
 
         if msg:
-            if msg.get("method") == "notify_status_update":
+            method = msg.get("method")
+            if method == "notify_status_update":
                 params = msg.get("params", [])
                 if params and isinstance(params[0], dict):
                     st0 = params[0].get("drukmix_controller")
                     if isinstance(st0, dict):
                         self._apply_controller_status(st0, now)
-            elif msg.get("method") == "notify_klippy_ready":
+            elif method == "notify_klippy_ready":
                 self.log.info("drukmix_driver: klippy ready")
                 if await self._subscribe_controller():
                     await self._initial_query()
-            elif msg.get("method") == "notify_klippy_disconnected":
+            elif method == "notify_klippy_disconnected":
                 self.log.warning("drukmix_driver: klippy disconnected")
                 self.status.available = False
                 self.status.stale = True
                 self.status.last_t = now
-            elif msg.get("method") == "notify_remote_method":
+            elif method == "notify_remote_method":
                 params = msg.get("params", [])
                 if params and isinstance(params[0], str):
                     rmethod = params[0]
@@ -465,28 +466,34 @@ class Driver:
                         else {}
                     )
                     await self._handle_remote(rmethod, rparams)
+            elif isinstance(method, str) and method.startswith("drukmix_"):
+                params = msg.get("params", {})
+                if not isinstance(params, dict):
+                    params = {}
+                await self._handle_remote(method, params)
 
         # Drain any additional notifications immediately after the awaited event
         while True:
             extra = self.mr.notify_nowait()
             if not extra:
                 break
-            if extra.get("method") == "notify_status_update":
+            method = extra.get("method")
+            if method == "notify_status_update":
                 params = extra.get("params", [])
                 if params and isinstance(params[0], dict):
                     st0 = params[0].get("drukmix_controller")
                     if isinstance(st0, dict):
                         self._apply_controller_status(st0, now)
-            elif extra.get("method") == "notify_klippy_ready":
+            elif method == "notify_klippy_ready":
                 self.log.info("drukmix_driver: klippy ready")
                 if await self._subscribe_controller():
                     await self._initial_query()
-            elif extra.get("method") == "notify_klippy_disconnected":
+            elif method == "notify_klippy_disconnected":
                 self.log.warning("drukmix_driver: klippy disconnected")
                 self.status.available = False
                 self.status.stale = True
                 self.status.last_t = now
-            elif extra.get("method") == "notify_remote_method":
+            elif method == "notify_remote_method":
                 params = extra.get("params", [])
                 if params and isinstance(params[0], str):
                     rmethod = params[0]
@@ -496,6 +503,11 @@ class Driver:
                         else {}
                     )
                     await self._handle_remote(rmethod, rparams)
+            elif isinstance(method, str) and method.startswith("drukmix_"):
+                params = extra.get("params", {})
+                if not isinstance(params, dict):
+                    params = {}
+                await self._handle_remote(method, params)
 
         # Flush timeout
         if self.flush_until > 0.0 and now >= self.flush_until:
