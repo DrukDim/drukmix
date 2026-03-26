@@ -280,6 +280,7 @@ class Driver:
         self.log = log
         self.mr: Optional[MoonrakerClient] = None
         self.backend = None
+        self.flush_active: bool = False
         self.flush_until: float = 0.0
         self.flush_pct: float = 0.0
         self.flush_rev: bool = False
@@ -412,7 +413,7 @@ class Driver:
         if method == "drukmix_status":
             await self._refresh_controller_status()
             backend = self.backend.poll_status()
-            flush_active = self.flush_until > 0.0 or self.flush_pct > 0.0
+            flush_active = self.flush_active
             flush_remaining = (
                 max(0.0, self.flush_until - now) if self.flush_until > 0.0 else 0.0
             )
@@ -434,6 +435,7 @@ class Driver:
             )
             return
         if method == "drukmix_stop":
+            self.flush_active = False
             self.flush_until = 0.0
             self.flush_pct = 0.0
             self.flush_rev = False
@@ -443,6 +445,7 @@ class Driver:
         if method == "drukmix_flush":
             pct = max(0.0, min(100.0, float(params.get("pct", 100.0))))
             dur = max(0.0, float(params.get("duration", 0.0)))
+            self.flush_active = True
             self.flush_pct = pct
             self.flush_rev = False
             self.flush_until = (now + dur) if dur > 0 else 0.0
@@ -454,6 +457,7 @@ class Driver:
         if method == "drukmix_reverse":
             pct = max(0.0, min(100.0, float(params.get("pct", 100.0))))
             dur = max(0.0, float(params.get("duration", 0.0)))
+            self.flush_active = True
             self.flush_pct = pct
             self.flush_rev = True
             self.flush_until = (now + dur) if dur > 0 else 0.0
@@ -574,14 +578,15 @@ class Driver:
                 await self._handle_remote(method, params)
 
         # Flush timeout
-        if self.flush_until > 0.0 and now >= self.flush_until:
+        if self.flush_active and self.flush_until > 0.0 and now >= self.flush_until:
+            self.flush_active = False
             self.flush_until = 0.0
             self.flush_pct = 0.0
             self.flush_rev = False
             self.backend.stop()
 
         # Apply controller status (unless flushing)
-        if self.flush_until <= 0.0:
+        if not self.flush_active:
             age = now - self.status.last_t
             stale = (age > max(0.1, self.cfg.status_timeout_s)) or self.status.stale
             blocked = (
