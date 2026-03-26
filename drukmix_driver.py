@@ -28,6 +28,10 @@ CONTROLLER_FIELDS = [
     "v_mms",
     "available",
     "stale",
+    "gain_pct",
+    "max_flow_lpm",
+    "pump_start_lookahead_s",
+    "pump_stop_lookahead_s",
 ]
 
 DEFAULT_CFG_PATH = os.path.expanduser("~/printer_data/config/drukmix_driver.cfg")
@@ -263,6 +267,10 @@ class ControllerStatus:
     reason: str = "unknown"
     available: bool = False
     stale: bool = True
+    gain_pct: float = 100.0
+    max_flow_lpm: float = 10.0
+    pump_start_lookahead_s: float = 0.0
+    pump_stop_lookahead_s: float = 0.0
     last_t: float = 0.0
 
 
@@ -318,6 +326,7 @@ class Driver:
             "drukmix_status",
             "drukmix_stop",
             "drukmix_flush",
+            "drukmix_reverse",
             "drukmix_reset_fault",
         ):
             try:
@@ -369,21 +378,51 @@ class Driver:
             self.status.available = bool(st.get("available", self.status.available))
         if "stale" in st:
             self.status.stale = bool(st.get("stale", self.status.stale))
+        if "gain_pct" in st:
+            self.status.gain_pct = float(st.get("gain_pct", self.status.gain_pct))
+        if "max_flow_lpm" in st:
+            self.status.max_flow_lpm = float(
+                st.get("max_flow_lpm", self.status.max_flow_lpm)
+            )
+        if "pump_start_lookahead_s" in st:
+            self.status.pump_start_lookahead_s = float(
+                st.get("pump_start_lookahead_s", self.status.pump_start_lookahead_s)
+            )
+        if "pump_stop_lookahead_s" in st:
+            self.status.pump_stop_lookahead_s = float(
+                st.get("pump_stop_lookahead_s", self.status.pump_stop_lookahead_s)
+            )
         self.status.last_t = now
 
     async def _handle_remote(self, method: str, params: dict):
         now = time.monotonic()
-        if method == "drukmix_ping":
-            await self._respond("command", "DrukMix driver: ping OK")
-            return
         if method == "drukmix_status":
+            backend = self.backend.poll_status()
+            flush_active = self.flush_until > 0.0 or self.flush_pct > 0.0
+            flush_remaining = (
+                max(0.0, self.flush_until - now) if self.flush_until > 0.0 else 0.0
+            )
             await self._respond(
                 "command",
-                f"DrukMix driver: state={self.status.state} target={self.status.target_pct:.1f}% rev={int(self.status.rev)} available={int(self.status.available)} stale={int(self.status.stale)} reason={self.status.reason}",
+                (
+                    f"DrukMix: state={self.status.state} target={self.status.target_pct:.1f}% "
+                    f"rev={int(self.status.rev)} available={int(self.status.available)} "
+                    f"stale={int(self.status.stale)} reason={self.status.reason} "
+                    f"gain={self.status.gain_pct:.1f}% lpm={self.status.max_flow_lpm:.3f} "
+                    f"prestart={self.status.pump_start_lookahead_s:.3f}s "
+                    f"prestop={self.status.pump_stop_lookahead_s:.3f}s "
+                    f"backend={backend.backend} mode={backend.control_mode} link_ok={int(backend.link_ok)} "
+                    f"running={-1 if backend.running is None else int(bool(backend.running))} "
+                    f"fault={int(backend.faulted)} code={backend.fault_code} "
+                    f"flush={int(flush_active)} flush_pct={self.flush_pct:.1f}% "
+                    f"flush_rev={int(self.flush_rev)} flush_left={flush_remaining:.1f}s"
+                ),
             )
             return
         if method == "drukmix_stop":
             self.flush_until = 0.0
+            self.flush_pct = 0.0
+            self.flush_rev = False
             self.backend.stop()
             await self._respond("error", "DrukMix driver: STOP")
             return
@@ -396,6 +435,17 @@ class Driver:
             self.backend.set_auto_target_pct(pct, False)
             await self._respond(
                 "command", f"DrukMix driver: FLUSH {pct:.1f}% for {dur:.1f}s"
+            )
+            return
+        if method == "drukmix_reverse":
+            pct = max(0.0, min(100.0, float(params.get("pct", 100.0))))
+            dur = max(0.0, float(params.get("duration", 0.0)))
+            self.flush_pct = pct
+            self.flush_rev = True
+            self.flush_until = (now + dur) if dur > 0 else 0.0
+            self.backend.set_auto_target_pct(pct, True)
+            await self._respond(
+                "command", f"DrukMix driver: REVERSE {pct:.1f}% for {dur:.1f}s"
             )
             return
         if method == "drukmix_reset_fault":
@@ -513,6 +563,7 @@ class Driver:
         if self.flush_until > 0.0 and now >= self.flush_until:
             self.flush_until = 0.0
             self.flush_pct = 0.0
+            self.flush_rev = False
             self.backend.stop()
 
         # Apply controller status (unless flushing)

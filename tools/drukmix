@@ -129,6 +129,11 @@ install_macros_if_missing() {
   fi
 }
 
+sync_macros_from_repo() {
+  cp "$MACROS_TEMPLATE" "$MACROS_DST"
+  echo "Synced macros from repo: $MACROS_DST"
+}
+
 remove_file_if_present() {
   local path="$1"
   rm -f "$path"
@@ -491,7 +496,7 @@ do_install() {
   ensure_venv
   compile_check
   install_cfg_if_missing
-  install_macros_if_missing
+  sync_macros_from_repo
   remove_file_if_present "$PRINTER_CFG_DIR/drukmix_research.cfg"
   remove_file_if_present "$LEGACY_PLANNER_DST"
   rm -f "$KLIPPER_VEXT_DST"
@@ -523,6 +528,7 @@ do_update() {
   git -C "$REPO_DIR" pull --ff-only
   ensure_venv
   compile_check
+  sync_macros_from_repo
   remove_file_if_present "$PRINTER_CFG_DIR/drukmix_research.cfg"
   remove_file_if_present "$PRINTER_CFG_DIR/drukmix_planner.cfg"
   rm -f "$KLIPPER_VEXT_DST"

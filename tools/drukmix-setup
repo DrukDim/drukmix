@@ -125,6 +125,13 @@ copy_if_missing() {
   log "installed: $dst"
 }
 
+copy_force() {
+  local src="$1" dst="$2"
+  ensure_dir "$(dirname "$dst")"
+  cp "$src" "$dst"
+  log "installed: $dst"
+}
+
 require_path() { [[ -e "$1" ]] || die "missing: $1"; }
 
 append_include_if_missing() {
@@ -170,7 +177,7 @@ install_controller() {
 }
 
 install_configs() {
-  copy_if_missing "$MACROS_SRC" "$MACROS_DST"
+  copy_force "$MACROS_SRC" "$MACROS_DST"
   copy_if_missing "$CTRL_CFG_SRC" "$CTRL_CFG_DST"
   if [[ -e "$DRIVER_CFG_DST" && $FORCE_DRIVER_CFG -eq 0 ]]; then
     log "skip (exists): $DRIVER_CFG_DST"

@@ -18,8 +18,11 @@
 # - Planner authority comes from drukmix_planner_probe.
 # - Transport/backend logic remains host-side.
 
+import configparser
 import logging
 import math
+import os
+import re
 
 
 def clamp(x: float, lo: float, hi: float) -> float:
@@ -30,9 +33,16 @@ class DrukMixController:
     def __init__(self, config):
         self.printer = config.get_printer()
         self.reactor = self.printer.get_reactor()
+        self.gcode = self.printer.lookup_object("gcode")
         self.probe_name = config.get("probe", "drukmix_planner_probe")
         self.extruder_name = config.get("extruder", "extruder")
         self.enabled = config.getboolean("enabled", True)
+        self.runtime_cfg_path = os.path.expanduser(
+            config.get(
+                "runtime_cfg_path",
+                os.path.expanduser("~/printer_data/config/drukmix_controller.cfg"),
+            )
+        )
 
         # Lookahead / policy
         self.start_lookahead_s = config.getfloat(
@@ -74,6 +84,13 @@ class DrukMixController:
         self.debug_enabled = config.getboolean("debug_enabled", False)
         self.debug_log_every_s = config.getfloat("debug_log_every_s", 1.0, minval=0.1)
 
+        self._boot_tuning = {
+            "gain_pct": self.gain_pct,
+            "max_flow_lpm": self.max_flow_lpm,
+            "pump_start_lookahead_s": self.start_lookahead_s,
+            "pump_stop_lookahead_s": self.stop_lookahead_s,
+        }
+
         # Runtime references
         self.probe = None
         self.gcode_move = None
@@ -86,6 +103,12 @@ class DrukMixController:
         self.liters_per_mm = self._calc_liters_per_mm(self.filament_diameter_mm)
 
         self.printer.register_event_handler("klippy:connect", self._handle_connect)
+        self.gcode.register_command("SET_DRUKMIX_GAIN", self.cmd_DRUKMIX_GAIN)
+        self.gcode.register_command("SET_DRUKMIX_LPM", self.cmd_DRUKMIX_LPM)
+        self.gcode.register_command("SET_DRUKMIX_PRESTART", self.cmd_DRUKMIX_PRESTART)
+        self.gcode.register_command("SET_DRUKMIX_PRESTOP", self.cmd_DRUKMIX_PRESTOP)
+        self.gcode.register_command("SET_DRUKMIX_SAVE", self.cmd_DRUKMIX_SAVE)
+        self.gcode.register_command("SET_DRUKMIX_RESET", self.cmd_DRUKMIX_RESET)
 
     def _calc_liters_per_mm(self, diameter_mm: float) -> float:
         r = max(0.0, diameter_mm) / 2.0
@@ -185,10 +208,132 @@ class DrukMixController:
             "v_mms": float(max(0.0, v_mms)),
             "available": bool(available),
             "stale": bool(stale),
+            "gain_pct": float(self.gain_pct),
+            "max_flow_lpm": float(self.max_flow_lpm),
+            "pump_start_lookahead_s": float(self.start_lookahead_s),
+            "pump_stop_lookahead_s": float(self.stop_lookahead_s),
         }
         self._maybe_debug(out)
         self._last_status = out
         return out
+
+    def _set_runtime_tuning(
+        self,
+        *,
+        gain_pct=None,
+        max_flow_lpm=None,
+        pump_start_lookahead_s=None,
+        pump_stop_lookahead_s=None,
+    ):
+        if gain_pct is not None:
+            self.gain_pct = clamp(float(gain_pct), 0.0, 300.0)
+        if max_flow_lpm is not None:
+            self.max_flow_lpm = max(0.001, float(max_flow_lpm))
+        if pump_start_lookahead_s is not None:
+            self.start_lookahead_s = max(0.0, float(pump_start_lookahead_s))
+        if pump_stop_lookahead_s is not None:
+            self.stop_lookahead_s = max(0.0, float(pump_stop_lookahead_s))
+
+    def _read_saved_tuning(self):
+        cp = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
+        if not cp.read(self.runtime_cfg_path):
+            return dict(self._boot_tuning)
+        if "drukmix_controller" not in cp:
+            return dict(self._boot_tuning)
+        s = cp["drukmix_controller"]
+        return {
+            "gain_pct": s.getfloat("gain_pct", fallback=self._boot_tuning["gain_pct"]),
+            "max_flow_lpm": s.getfloat(
+                "max_flow_lpm", fallback=self._boot_tuning["max_flow_lpm"]
+            ),
+            "pump_start_lookahead_s": s.getfloat(
+                "pump_start_lookahead_s",
+                fallback=self._boot_tuning["pump_start_lookahead_s"],
+            ),
+            "pump_stop_lookahead_s": s.getfloat(
+                "pump_stop_lookahead_s",
+                fallback=self._boot_tuning["pump_stop_lookahead_s"],
+            ),
+        }
+
+    def _write_saved_tuning(self):
+        keys = {
+            "gain_pct": f"{self.gain_pct:.3f}",
+            "max_flow_lpm": f"{self.max_flow_lpm:.3f}",
+            "pump_start_lookahead_s": f"{self.start_lookahead_s:.3f}",
+            "pump_stop_lookahead_s": f"{self.stop_lookahead_s:.3f}",
+        }
+        with open(self.runtime_cfg_path, "r", encoding="utf-8", errors="ignore") as fh:
+            lines = fh.readlines()
+
+        section_start = None
+        section_end = len(lines)
+        section_re = re.compile(r"^\s*\[([^\]]+)\]\s*$")
+        for idx, line in enumerate(lines):
+            m = section_re.match(line)
+            if not m:
+                continue
+            if m.group(1).strip().lower() == "drukmix_controller":
+                section_start = idx
+                continue
+            if section_start is not None:
+                section_end = idx
+                break
+        if section_start is None:
+            raise RuntimeError(
+                f"[drukmix_controller] section not found in {self.runtime_cfg_path}"
+            )
+
+        for key, value in keys.items():
+            key_re = re.compile(rf"^(\s*{re.escape(key)}\s*[:=]\s*)([^#;\n]*)(.*)$")
+            replaced = False
+            for idx in range(section_start + 1, section_end):
+                line = lines[idx]
+                m = key_re.match(line)
+                if not m:
+                    continue
+                lines[idx] = f"{m.group(1)}{value}{m.group(3)}\n"
+                replaced = True
+                break
+            if not replaced:
+                lines.insert(section_end, f"{key}: {value}\n")
+                section_end += 1
+
+        with open(self.runtime_cfg_path, "w", encoding="utf-8") as fh:
+            fh.writelines(lines)
+
+    def cmd_DRUKMIX_GAIN(self, gcmd):
+        pct = gcmd.get_float("PCT", minval=0.0, maxval=300.0)
+        self._set_runtime_tuning(gain_pct=pct)
+        gcmd.respond_info(f"DrukMix: gain_pct={self.gain_pct:.1f}")
+
+    def cmd_DRUKMIX_LPM(self, gcmd):
+        lpm = gcmd.get_float("LPM", minval=0.001)
+        self._set_runtime_tuning(max_flow_lpm=lpm)
+        gcmd.respond_info(f"DrukMix: max_flow_lpm={self.max_flow_lpm:.3f}")
+
+    def cmd_DRUKMIX_PRESTART(self, gcmd):
+        sec = gcmd.get_float("SEC", minval=0.0)
+        self._set_runtime_tuning(pump_start_lookahead_s=sec)
+        gcmd.respond_info(
+            f"DrukMix: pump_start_lookahead_s={self.start_lookahead_s:.3f}"
+        )
+
+    def cmd_DRUKMIX_PRESTOP(self, gcmd):
+        sec = gcmd.get_float("SEC", minval=0.0)
+        self._set_runtime_tuning(pump_stop_lookahead_s=sec)
+        gcmd.respond_info(f"DrukMix: pump_stop_lookahead_s={self.stop_lookahead_s:.3f}")
+
+    def cmd_DRUKMIX_SAVE(self, gcmd):
+        self._write_saved_tuning()
+        gcmd.respond_info(
+            "DrukMix: saved gain/lpm/prestart/prestop to drukmix_controller.cfg"
+        )
+
+    def cmd_DRUKMIX_RESET(self, gcmd):
+        saved = self._read_saved_tuning()
+        self._set_runtime_tuning(**saved)
+        gcmd.respond_info("DrukMix: reset to saved gain/lpm/prestart/prestop values")
 
     def _maybe_debug(self, st):
         if not self.debug_enabled:
