@@ -31,6 +31,7 @@ void espnow_add_peer(const uint8_t mac[6]);
 
 void espnow_send_flow(
     const uint8_t mac[6],
+    uint16_t dst_node,
     uint8_t proto,
     uint16_t seq,
     int32_t target_milli_lpm,
@@ -40,6 +41,7 @@ void espnow_send_flow(
 
 void espnow_send_maxlpm(
     const uint8_t mac[6],
+    uint16_t dst_node,
     uint8_t proto,
     uint16_t seq,
     int32_t pump_max_milli_lpm,
@@ -48,6 +50,7 @@ void espnow_send_maxlpm(
 
 void espnow_send_reset_fault(
     const uint8_t mac[6],
+    uint16_t dst_node,
     uint8_t proto,
     uint16_t seq,
     uint16_t selector,
@@ -58,5 +61,7 @@ void espnow_on_recv(
     const uint8_t* mac_addr,
     const uint8_t* data,
     int len,
+    const uint8_t expected_mac[6],
+    uint16_t expected_node,
     uint8_t proto,
     EspNowState* st);

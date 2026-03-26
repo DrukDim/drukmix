@@ -8,12 +8,16 @@
 #include "usb_link.h"
 #include "peer_table.h"
 #include "dmbus_hello.h"
+#include "drukmix_bus_v1.h"
+#include "drukmix_bus_util.h"
 #ifndef BUILD_GIT_HASH
 #define BUILD_GIT_HASH "dev"
 #endif
 
 static EspNowState g_now_state{};
 static PeerTable g_peer_table{};
+static PeerRecord g_active_pump{};
+static bool g_active_pump_bound = false;
 
 static uint16_t g_cmd_seq = 0;
 static int32_t  g_target_milli_lpm = 0;
@@ -37,31 +41,68 @@ static uint32_t pending_ack_timeout_ms() {
   return ACK_TIMEOUT_MS;
 }
 
-static const PeerRecord* find_pump_peer() {
-  const PeerRecord* vfd = g_peer_table.find_by_node(PUMP_NODE_ID_VFD);
-  const PeerRecord* tpl = g_peer_table.find_by_node(PUMP_NODE_ID_TPL);
+static bool parse_hello_peer(
+    const uint8_t* mac_addr,
+    const uint8_t* data,
+    int len,
+    PeerRecord* out) {
+  if (!mac_addr || !data || !out) return false;
+  if (len < (int)(sizeof(dmbus::Header) + sizeof(dmbus::Hello) + sizeof(dmbus::FrameCrc))) return false;
+  if (!dmbus::frame_valid(data, (size_t)len)) return false;
 
-  if (vfd && tpl) {
-    return (vfd->last_seen_ms >= tpl->last_seen_ms) ? vfd : tpl;
-  }
-  return vfd ? vfd : tpl;
+  const auto* h = reinterpret_cast<const dmbus::Header*>(data);
+  if (h->msg_type != dmbus::MSG_HELLO) return false;
+  if (h->payload_len != sizeof(dmbus::Hello)) return false;
+
+  const auto* hello = reinterpret_cast<const dmbus::Hello*>(data + sizeof(dmbus::Header));
+  if (hello->device_class != dmbus::DEV_PUMP) return false;
+
+  PeerRecord peer{};
+  peer.used = true;
+  peer.node_id = hello->proposed_node_id;
+  peer.device_class = hello->device_class;
+  peer.driver_type = hello->driver_type;
+  peer.hardware_uid_lo = hello->hardware_uid_lo;
+  peer.hardware_uid_hi = hello->hardware_uid_hi;
+  memcpy(peer.mac, mac_addr, 6);
+  peer.last_seen_ms = millis();
+  *out = peer;
+  return true;
+}
+
+static const PeerRecord* active_pump_peer() {
+  return g_active_pump_bound ? &g_active_pump : nullptr;
 }
 
 static void on_now_recv(const uint8_t* mac_addr, const uint8_t* data, int len) {
+  PeerRecord hello_peer{};
+  if (!g_active_pump_bound && parse_hello_peer(mac_addr, data, len, &hello_peer)) {
+    g_active_pump = hello_peer;
+    g_active_pump_bound = true;
+  }
+
   if (dmbus_try_handle_hello(mac_addr, data, len, &g_peer_table, millis())) {
     return;
   }
-  espnow_on_recv(mac_addr, data, len, BRIDGE_PROTO, &g_now_state);
+  if (!g_active_pump_bound) return;
+  espnow_on_recv(
+      mac_addr,
+      data,
+      len,
+      g_active_pump.mac,
+      g_active_pump.node_id,
+      BRIDGE_PROTO,
+      &g_now_state);
 }
 
 static void usb_send_status(uint16_t seq_reply) {
-  const auto* p = find_pump_peer();
+  const auto* p = active_pump_peer();
   uint32_t age_ms = (!p)
       ? 0xFFFFFFFFu
-      : (millis() - p->last_seen_ms);
+      : max<uint32_t>(millis() - g_now_state.last_seen_ms, 0u);
 
   UsbStatusPayload st{};
-  st.pump_link = (p && age_ms < DEVICE_OFFLINE_MS);
+  st.pump_link = (p && g_now_state.last_seen_ms != 0 && age_ms < DEVICE_OFFLINE_MS);
   st.last_seen_div10 = (age_ms == 0xFFFFFFFFu)
       ? 65535
       : (uint16_t)min<uint32_t>(age_ms / 10, 65535);
@@ -95,7 +136,7 @@ static void handle_usb_packet(const uint8_t* pkt, size_t len) {
   if (hdr.type == USB_SET_FLOW) {
     if (body_len < 5) return;
 
-    const auto* p = find_pump_peer();
+    const auto* p = active_pump_peer();
     if (!p) {
       usb_send_status(hdr.seq);
       return;
@@ -113,6 +154,7 @@ static void handle_usb_packet(const uint8_t* pkt, size_t len) {
     espnow_add_peer(p->mac);
     espnow_send_flow(
         p->mac,
+        p->node_id,
         BRIDGE_PROTO,
         g_cmd_seq,
         g_target_milli_lpm,
@@ -125,7 +167,7 @@ static void handle_usb_packet(const uint8_t* pkt, size_t len) {
   } else if (hdr.type == USB_SET_MAXLPM) {
     if (body_len < 4) return;
 
-    const auto* p = find_pump_peer();
+    const auto* p = active_pump_peer();
     if (!p) {
       usb_send_status(hdr.seq);
       return;
@@ -141,6 +183,7 @@ static void handle_usb_packet(const uint8_t* pkt, size_t len) {
     espnow_add_peer(p->mac);
     espnow_send_maxlpm(
         p->mac,
+        p->node_id,
         BRIDGE_PROTO,
         g_cmd_seq,
         g_pump_max_milli_lpm,
@@ -152,7 +195,7 @@ static void handle_usb_packet(const uint8_t* pkt, size_t len) {
   } else if (hdr.type == USB_RESET_FAULT) {
     if (body_len < 2) return;
 
-    const auto* p = find_pump_peer();
+    const auto* p = active_pump_peer();
     if (!p) {
       usb_send_status(hdr.seq);
       return;
@@ -169,6 +212,7 @@ static void handle_usb_packet(const uint8_t* pkt, size_t len) {
     espnow_add_peer(p->mac);
     espnow_send_reset_fault(
         p->mac,
+        p->node_id,
         BRIDGE_PROTO,
         g_cmd_seq,
         selector,
@@ -224,7 +268,7 @@ void loop() {
       g_now_state.retry_left > 0 &&
       (millis() - g_now_state.last_send_ms) > pending_ack_timeout_ms()) {
 
-    const auto* p = find_pump_peer();
+    const auto* p = active_pump_peer();
     if (p) {
       g_now_state.retry_left--;
       g_now_state.retry_count++;
@@ -234,6 +278,7 @@ void loop() {
       if (g_pending_cmd == PENDING_FLOW) {
         espnow_send_flow(
             p->mac,
+            p->node_id,
             BRIDGE_PROTO,
             g_cmd_seq,
             g_target_milli_lpm,
@@ -243,6 +288,7 @@ void loop() {
       } else if (g_pending_cmd == PENDING_MAXLPM) {
         espnow_send_maxlpm(
             p->mac,
+            p->node_id,
             BRIDGE_PROTO,
             g_cmd_seq,
             g_pump_max_milli_lpm,
@@ -251,6 +297,7 @@ void loop() {
       } else if (g_pending_cmd == PENDING_RESET_FAULT) {
         espnow_send_reset_fault(
             p->mac,
+            p->node_id,
             BRIDGE_PROTO,
             g_cmd_seq,
             g_reset_selector,

@@ -7,7 +7,6 @@
 #include "drukmix_bus_util.h"
 
 static constexpr uint16_t BRIDGE_NODE_ID = 0x0001;
-static constexpr uint16_t PUMP_NODE_ID   = 0x0100;
 static constexpr uint8_t  DEVICE_CLASS_BRIDGE = dmbus::DEV_BRIDGE;
 
 void espnow_begin(int wifi_channel) {
@@ -66,6 +65,7 @@ struct FramePumpStatus {
 
 void espnow_send_flow(
     const uint8_t mac[6],
+    uint16_t dst_node,
     uint8_t proto,
     uint16_t seq,
     int32_t target_milli_lpm,
@@ -78,7 +78,7 @@ void espnow_send_flow(
   f.h.msg_type = dmbus::MSG_CMD;
   f.h.seq = seq;
   f.h.src_node = BRIDGE_NODE_ID;
-  f.h.dst_node = PUMP_NODE_ID;
+  f.h.dst_node = dst_node;
   f.h.device_class = DEVICE_CLASS_BRIDGE;
   f.h.opcode = dmbus::PUMP_SET_FLOW;
   f.h.payload_len = sizeof(dmbus::PumpSetFlow);
@@ -100,6 +100,7 @@ void espnow_send_flow(
 
 void espnow_send_maxlpm(
     const uint8_t mac[6],
+    uint16_t dst_node,
     uint8_t proto,
     uint16_t seq,
     int32_t pump_max_milli_lpm,
@@ -111,7 +112,7 @@ void espnow_send_maxlpm(
   f.h.msg_type = dmbus::MSG_CMD;
   f.h.seq = seq;
   f.h.src_node = BRIDGE_NODE_ID;
-  f.h.dst_node = PUMP_NODE_ID;
+  f.h.dst_node = dst_node;
   f.h.device_class = DEVICE_CLASS_BRIDGE;
   f.h.opcode = dmbus::PUMP_SET_MAX_FLOW;
   f.h.payload_len = sizeof(dmbus::PumpSetMaxFlow);
@@ -129,6 +130,7 @@ void espnow_send_maxlpm(
 
 void espnow_send_reset_fault(
     const uint8_t mac[6],
+    uint16_t dst_node,
     uint8_t proto,
     uint16_t seq,
     uint16_t selector,
@@ -140,7 +142,7 @@ void espnow_send_reset_fault(
   f.h.msg_type = dmbus::MSG_CMD;
   f.h.seq = seq;
   f.h.src_node = BRIDGE_NODE_ID;
-  f.h.dst_node = PUMP_NODE_ID;
+  f.h.dst_node = dst_node;
   f.h.device_class = DEVICE_CLASS_BRIDGE;
   f.h.opcode = dmbus::OP_RESET_FAULT;
   f.h.payload_len = sizeof(dmbus::ResetFault);
@@ -159,17 +161,21 @@ void espnow_on_recv(
     const uint8_t* mac_addr,
     const uint8_t* data,
     int len,
+    const uint8_t expected_mac[6],
+    uint16_t expected_node,
     uint8_t proto,
     EspNowState* st) {
 
-  (void)mac_addr;
-
   if (!data || !st) return;
+  if (!mac_addr || !expected_mac || expected_node == 0) return;
   if (len < (int)(sizeof(dmbus::Header) + sizeof(dmbus::FrameCrc))) return;
   if (!dmbus::frame_valid(data, (size_t)len)) return;
 
+  if (memcmp(mac_addr, expected_mac, 6) != 0) return;
+
   const auto* h = reinterpret_cast<const dmbus::Header*>(data);
   if (h->proto_ver != proto) return;
+  if (h->src_node != expected_node) return;
   if (h->dst_node != BRIDGE_NODE_ID && h->dst_node != dmbus::NODE_BROADCAST) return;
 
   st->last_seen_ms = millis();
