@@ -16,6 +16,7 @@ void PumpVfdNode::begin() {
   status_.actual_milli_lpm = 0;
   status_.max_milli_lpm = max_milli_lpm_;
   status_.cmd_setpoint_raw = 0;
+  rev_commanded_ = false;
 }
 
 void PumpVfdNode::handle_rx_() {
@@ -80,8 +81,9 @@ void PumpVfdNode::handle_rx_() {
 
     bool ok = true;
 
-    if (rx.target_milli_lpm <= 0 || (rx.flags & 0x02)) ok = stop();
-    else ok = set_flow(rx.target_milli_lpm);
+    bool rev = (rx.flags & 0x01) != 0;
+    if (rx.target_milli_lpm <= 0) ok = stop();
+    else ok = set_flow_direction_(rx.target_milli_lpm, rev);
 
     link_.send_ack(
         rx.seq,
@@ -154,9 +156,14 @@ void PumpVfdNode::update() {
 }
 
 bool PumpVfdNode::set_flow(int32_t target_milli_lpm) {
+  return set_flow_direction_(target_milli_lpm, false);
+}
+
+bool PumpVfdNode::set_flow_direction_(int32_t target_milli_lpm, bool rev) {
   target_milli_lpm_ = target_milli_lpm;
   status_.target_milli_lpm = target_milli_lpm;
   status_.max_milli_lpm = max_milli_lpm_;
+  rev_commanded_ = rev;
 
   if (target_milli_lpm <= 0) return stop();
 
@@ -185,7 +192,11 @@ bool PumpVfdNode::set_flow(int32_t target_milli_lpm) {
   status_.cmd_setpoint_raw = pct_x100;
 
   if (!vfd_.set_frequency_pct_x100((uint16_t)pct_x100)) return false;
-  if (!vfd_.set_run_forward()) return false;
+  if (rev) {
+    if (!vfd_.set_run_reverse()) return false;
+  } else {
+    if (!vfd_.set_run_forward()) return false;
+  }
 
   status_.running = true;
   return true;
@@ -194,6 +205,7 @@ bool PumpVfdNode::set_flow(int32_t target_milli_lpm) {
 bool PumpVfdNode::stop() {
   status_.target_milli_lpm = 0;
   status_.cmd_setpoint_raw = 0;
+  rev_commanded_ = false;
   // Zero target is host-controlled semantics. Do not invent a separate local
   // ramp policy in the ESP node: first drive the commanded frequency to zero,
   // then issue the backend stop command.
@@ -257,6 +269,9 @@ uint16_t PumpVfdNode::compose_pump_flags_() const {
   uint16_t flags = 0;
 
   if (status_.running) flags |= dmbus::PUMP_FLAG_RUNNING;
+  if (status_.target_milli_lpm > 0) {
+    flags |= rev_commanded_ ? dmbus::PUMP_FLAG_REVERSE : dmbus::PUMP_FLAG_FORWARD;
+  }
   if (is_manual_mode_active_()) flags |= dmbus::PUMP_FLAG_MANUAL_MODE;
   else flags |= dmbus::PUMP_FLAG_REMOTE_MODE;
   if (status_.online) flags |= dmbus::PUMP_FLAG_HW_READY;

@@ -20,6 +20,10 @@ bool VfdM980Driver::set_run_forward() {
   return modbus_.write_single_register(MODBUS_SLAVE_ID, REG_CMD_CONTROL, 1);
 }
 
+bool VfdM980Driver::set_run_reverse() {
+  return modbus_.write_single_register(MODBUS_SLAVE_ID, REG_CMD_CONTROL, 2);
+}
+
 bool VfdM980Driver::set_stop_ramp() {
   return modbus_.write_single_register(MODBUS_SLAVE_ID, REG_CMD_CONTROL, 6);
 }

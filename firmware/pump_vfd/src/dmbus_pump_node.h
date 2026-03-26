@@ -21,9 +21,11 @@ private:
   uint32_t last_status_ms_ = 0;
   int32_t target_milli_lpm_ = 0;
   int32_t max_milli_lpm_ = 10000;
+  bool rev_commanded_ = false;
   PumpNodeStatus status_{};
 
   bool is_manual_mode_active_() const;
   uint16_t compose_pump_flags_() const;
   void handle_rx_();
+  bool set_flow_direction_(int32_t target_milli_lpm, bool rev);
 };

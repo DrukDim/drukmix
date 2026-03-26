@@ -15,6 +15,7 @@ class VfdM980Driver {
 public:
   void begin();
   bool set_run_forward();
+  bool set_run_reverse();
   bool set_stop_ramp();
   bool reset_fault();
   bool set_frequency_pct_x100(uint16_t value);
