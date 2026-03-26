@@ -251,6 +251,28 @@ Related areas:
 - `drukmix_agent.py`
 - runtime pause/safety logic
 
+### 9d. Operator flush/reverse override can remain logically active while backend-reported `running` stays false
+
+Status: active confirmed defect
+
+Verified on `duet` on 2026-03-26:
+- `DRUKMIX_FLUSH PCT=100 DURATION=0` now remains active until explicit `DRUKMIX_STOP`;
+- `DRUKMIX_REVERS PCT=100 DURATION=0` also remains active until explicit `DRUKMIX_STOP`;
+- `DRUKMIX_STATUS` correctly shows `flush=1`, `flush_pct=100.0%`, and `flush_rev=0/1` during the active operator override;
+- at the same time, backend-reported status still showed `mode=AUTO`, `link_ok=1`, `fault=0`, and `running=0`.
+
+Implication:
+- the macro/driver operator contract is working, but lower execution truth is still unresolved;
+- this must not be described as proven physical non-rotation, because there is currently no measured RPM/flow feedback in the canonical host status path;
+- the unresolved boundary is below operator-command acceptance and above measured physical truth, likely in bridge command application, pump-node/VFD interaction, or backend-reported status semantics.
+
+Related areas:
+- `drukmix_driver.py`
+- `backend/backend_pumpvfd.py`
+- `backend/bridge_usb_transport.py`
+- bridge / pump-node status semantics
+- operator override verification
+
 ## Active checklist
 
 These items are intentionally preserved from the prior canonical checklist.
