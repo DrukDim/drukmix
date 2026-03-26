@@ -142,7 +142,6 @@ Implication:
 Related areas:
 
 - `tools/drukmix`
-- `tools/drukmix-setup`
 - `~/printer_data/config/mainsail.cfg`
 
 ### 6. Bridge attachment currently depends on Linux udev alias strategy
