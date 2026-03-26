@@ -273,6 +273,33 @@ Related areas:
 - bridge / pump-node status semantics
 - operator override verification
 
+### 9e. Direct bridge `USB_SET_FLOW` command can fail to produce any observable bridge-status update
+
+Status: active confirmed defect
+
+Verified on `duet` on 2026-03-26 by stopping `drukmix.service` and issuing direct host-side bridge calls through `BridgeUsbTransport`:
+- `vfd_set_run(100, False)` produced no visible change in returned bridge status;
+- repeated raw status reads continued to report identical values including:
+  - `target_milli_lpm = 0`
+  - `hw_setpoint_raw = 0`
+  - `running = false`
+  - `last_ack_seq = 22`
+  - `applied_code = 1`
+  - `bridge_t_ms = 7751000`
+- the packet content appeared effectively frozen across multiple reads taken over several seconds, even though bridge status is expected to be pushed periodically and command/ack state should evolve.
+
+Implication:
+- the currently confirmed fault boundary is below macro/driver command acceptance;
+- the unresolved path is now specifically in bridge command application, bridge status freshness, or bridge <-> pump-node ack/status return handling;
+- this is stronger evidence than the higher-level `running=0` observation, because it reproduces even when bypassing Moonraker and the normal driver loop.
+
+Related areas:
+- `backend/bridge_usb_transport.py`
+- `firmware/bridge/src/main.cpp`
+- `firmware/bridge/src/espnow_link.cpp`
+- bridge USB status freshness
+- ESP-NOW ack/status return path
+
 ## Active checklist
 
 These items are intentionally preserved from the prior canonical checklist.
