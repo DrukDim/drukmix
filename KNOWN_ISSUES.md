@@ -223,21 +223,22 @@ Related areas:
 - host orchestration semantics
 
 
-### 9a. Planner probe may load successfully while runtime planned queue/velocity stays zero during active print
+### 9a. Planner/controller observability can disagree with observed machine behavior during live print
 
-Status: active confirmed defect
+Status: active confirmed observability defect
 
-`drukmix_planner_probe` is confirmed to load, hook, and appear in the include chain, but runtime automatic pump control can still see `queue_tail_s=0.000` and zero planned velocities during an active print.
+`drukmix_planner_probe` and controller status surfaces have produced live sessions where planned queue/velocity or controller state appeared inactive or null, while the real machine still showed automatic pump behavior such as `prestart`.
 
 Implication:
 
-- the current fault boundary is likely inside the planner signal path rather than simple config loading;
-- investigation must check the full path: extruder hook -> mirrored move queue -> probe status -> Moonraker status delivery -> agent status ingest.
+- the current confirmed problem is not that automatic planner-authoritative pumping is categorically broken;
+- the confirmed problem is that planner/controller observability is not yet fully trustworthy in all live sessions;
+- investigation must check the full path: extruder hook -> mirrored move queue -> probe status -> Moonraker status delivery -> host-side status observation.
 
 Related areas:
 
 - `klipper_extra/drukmix_planner_probe.py`
-- `drukmix_agent.py`
+- `klipper_extra/drukmix_controller.py`
 - Moonraker status transport
 - planner timebase / queue mirroring
 
@@ -293,40 +294,6 @@ Related areas:
 - `backend/bridge_usb_transport.py`
 - bridge / pump-node status semantics
 - operator override verification
-
-### 9e. Bridge-reported `pumpvfd` command success can diverge from the serial-debug truth of the connected `pump_vfd` node
-
-Status: active confirmed defect
-
-Verified on `duet` and the directly connected `pump_vfd` serial console on 2026-03-26:
-- direct host-side bridge calls through `BridgeUsbTransport.vfd_set_run(100, False)` reported successful bridge/backend state including:
-  - `target_milli_lpm = 10000`
-  - `hw_setpoint_raw = 10000`
-  - `running = true`
-  - `last_ack_seq` incrementing
-  - `pump_state = 4`
-  - `pump_flags = 145`
-- the same test observed on the physically connected `pump_vfd` serial debug console showed no matching receive/execute transition:
-  - `target = 0`
-  - `cmd_raw = 0`
-  - `running = 0`
-  - `vfd_freq_x10 = 0`
-  - `vfd_speed_raw = 0`
-  - `vfd_current_x10 = 0`
-- the same mismatch was also observed when invoking `DRUKMIX_FLUSH PCT=100 DURATION=0` through the normal macro path.
-
-Implication:
-- the currently confirmed fault boundary is below macro/driver command acceptance and below host-side bridge command issuance;
-- bridge-reported command success must not currently be treated as proof that the connected `pump_vfd` node actually received or executed the command;
-- the unresolved path is now specifically in bridge-to-node delivery, node identity/routing, or the truth semantics of bridge-side ACK/STATUS aggregation.
-
-Related areas:
-- `backend/bridge_usb_transport.py`
-- `firmware/bridge/src/main.cpp`
-- `firmware/bridge/src/espnow_link.cpp`
-- `firmware/pump_vfd/src/dmbus_pump_node.cpp`
-- bridge-to-node delivery and ACK/STATUS truth
-- ESP-NOW node identity / routing
 
 ## Active checklist
 
