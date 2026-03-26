@@ -6,7 +6,6 @@ from typing import Optional
 
 import serial
 
-
 BRIDGE_PROTO = 1
 
 USB_SET_FLOW = 1
@@ -15,20 +14,20 @@ USB_SET_MAXLPM = 3
 USB_RESET_FAULT = 4
 USB_BRIDGE_STATUS = 101
 
-PUMP_FLAG_RUNNING       = 1 << 0
-PUMP_FLAG_FORWARD       = 1 << 1
-PUMP_FLAG_REVERSE       = 1 << 2
-PUMP_FLAG_MANUAL_MODE   = 1 << 3
-PUMP_FLAG_REMOTE_MODE   = 1 << 4
+PUMP_FLAG_RUNNING = 1 << 0
+PUMP_FLAG_FORWARD = 1 << 1
+PUMP_FLAG_REVERSE = 1 << 2
+PUMP_FLAG_MANUAL_MODE = 1 << 3
+PUMP_FLAG_REMOTE_MODE = 1 << 4
 PUMP_FLAG_FAULT_LATCHED = 1 << 5
-PUMP_FLAG_WDOG_STOP     = 1 << 6
-PUMP_FLAG_HW_READY      = 1 << 7
+PUMP_FLAG_WDOG_STOP = 1 << 6
+PUMP_FLAG_HW_READY = 1 << 7
 
 
 def crc16_ccitt_false(data: bytes) -> int:
     crc = 0xFFFF
     for b in data:
-        crc ^= (b << 8)
+        crc ^= b << 8
         for _ in range(8):
             if crc & 0x8000:
                 crc = ((crc << 1) ^ 0x1021) & 0xFFFF
@@ -109,14 +108,15 @@ class BridgeUsbTransport:
             self.seq = 1
         return v
 
-    def _send_packet(self, pkt_type: int, body: bytes = b""):
+    def _send_packet(self, pkt_type: int, body: bytes = b"") -> int:
         if not self.ser:
             raise RuntimeError("serial not open")
+        seq = self._next_seq()
         hdr = struct.pack(
             "<BBHI",
             BRIDGE_PROTO,
             pkt_type,
-            self._next_seq(),
+            seq,
             int(time.monotonic() * 1000) & 0xFFFFFFFF,
         )
         frame = hdr + body
@@ -125,6 +125,7 @@ class BridgeUsbTransport:
         enc = cobs_encode(frame) + b"\x00"
         self.ser.write(enc)
         self.ser.flush()
+        return seq
 
     def _poll_packet(self) -> Optional[bytes]:
         if not self.ser:
@@ -173,36 +174,55 @@ class BridgeUsbTransport:
             return None
 
         off = 0
-        pump_link = bool(body[off]); off += 1
-        last_seen_div10 = struct.unpack_from("<H", body, off)[0]; off += 2
-        last_ack_seq = struct.unpack_from("<H", body, off)[0]; off += 2
-        applied_code = body[off]; off += 1
-        err_flags = struct.unpack_from("<H", body, off)[0]; off += 2
-        retry_count = struct.unpack_from("<H", body, off)[0]; off += 2
-        send_fail_count = struct.unpack_from("<H", body, off)[0]; off += 2
-        pump_max_milli_lpm = struct.unpack_from("<i", body, off)[0]; off += 4
+        pump_link = bool(body[off])
+        off += 1
+        last_seen_div10 = struct.unpack_from("<H", body, off)[0]
+        off += 2
+        last_ack_seq = struct.unpack_from("<H", body, off)[0]
+        off += 2
+        applied_code = body[off]
+        off += 1
+        err_flags = struct.unpack_from("<H", body, off)[0]
+        off += 2
+        retry_count = struct.unpack_from("<H", body, off)[0]
+        off += 2
+        send_fail_count = struct.unpack_from("<H", body, off)[0]
+        off += 2
+        pump_max_milli_lpm = struct.unpack_from("<i", body, off)[0]
+        off += 4
 
-        pump_state = struct.unpack_from("<H", body, off)[0]; off += 2
-        pump_fault_code = struct.unpack_from("<H", body, off)[0]; off += 2
-        pump_online = bool(body[off]); off += 1
-        pump_running = bool(body[off]); off += 1
-        target_milli_lpm = struct.unpack_from("<i", body, off)[0]; off += 4
+        pump_state = struct.unpack_from("<H", body, off)[0]
+        off += 2
+        pump_fault_code = struct.unpack_from("<H", body, off)[0]
+        off += 2
+        pump_online = bool(body[off])
+        off += 1
+        pump_running = bool(body[off])
+        off += 1
+        target_milli_lpm = struct.unpack_from("<i", body, off)[0]
+        off += 4
         off += 4  # reserved actual_milli_lpm field from bridge payload; ignored on host
-        hw_setpoint_raw = struct.unpack_from("<i", body, off)[0]; off += 4
-        pump_flags = struct.unpack_from("<H", body, off)[0]; off += 2
+        hw_setpoint_raw = struct.unpack_from("<i", body, off)[0]
+        off += 4
+        pump_flags = struct.unpack_from("<H", body, off)[0]
+        off += 2
 
         return {
             "link_ok": pump_link,
             "control_mode": (
-                "MANUAL" if (pump_flags & PUMP_FLAG_MANUAL_MODE) else
-                "AUTO" if (pump_flags & PUMP_FLAG_REMOTE_MODE) else
-                "UNKNOWN"
+                "MANUAL"
+                if (pump_flags & PUMP_FLAG_MANUAL_MODE)
+                else "AUTO"
+                if (pump_flags & PUMP_FLAG_REMOTE_MODE)
+                else "UNKNOWN"
             ),
             "running": pump_running,
             "rev_active": (
-                True if (pump_flags & PUMP_FLAG_REVERSE) else
-                False if (pump_flags & PUMP_FLAG_FORWARD) else
-                None
+                True
+                if (pump_flags & PUMP_FLAG_REVERSE)
+                else False
+                if (pump_flags & PUMP_FLAG_FORWARD)
+                else None
             ),
             "faulted": pump_fault_code != 0,
             "fault_code": pump_fault_code,
@@ -223,16 +243,20 @@ class BridgeUsbTransport:
         }
 
     def _request_status(self) -> Optional[dict]:
-        self._send_packet(USB_PING, b"")
+        req_seq = self._send_packet(USB_PING, b"")
         deadline = time.monotonic() + 0.30
         while time.monotonic() < deadline:
             pkt = self._poll_packet()
             if not pkt:
                 continue
             st = self._parse_status(pkt)
-            if st is not None:
-                self._last_status = st
-                self._last_status_monotonic = time.monotonic()
+            if st is None:
+                continue
+
+            self._last_status = st
+            self._last_status_monotonic = time.monotonic()
+
+            if st.get("seq_reply") == req_seq:
                 return st
         return None
 
