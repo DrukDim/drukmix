@@ -336,75 +336,45 @@ Status: active checklist item
 
 The project must stay multi-backend in its canonical description even if `pumpvfd` is the currently active field path.
 
-### 15. Make backend boundaries explicit: generic host logic vs backend-specific logic
+### 15. Make backend boundaries and layer ownership explicit
 
 Status: active checklist item
 
-Shared host logic and backend-specific behavior still need continued clarification and enforcement in both docs and implementation.
+Shared host logic, backend-specific behavior, and command/status ownership by layer still need continued clarification and enforcement in both docs and implementation.
 
-### 16. Define command ownership and status ownership by layer
-
-Status: active checklist item
-
-This has been partially documented, but it remains an active tracked item until fully reflected in architecture and code semantics.
-
-### 17. Define field-truth categories for operator-visible status semantics
+### 16. Define operator-visible status truth categories and truth-preserving naming
 
 Status: active checklist item
 
 Operator-visible status must stay explicitly classified by truth type and must not collapse different certainty levels into one ambiguous status surface.
 
-### 18. Reconcile command success with telemetry truth
+This includes:
+- classifying fields as `planned`, `requested`, `delivered`, `acknowledged`, `backend_reported`, `measured`, or `stale`;
+- separating requested target, delivered command, backend-reported output, and real physical output in naming and architecture;
+- removing misleading host-visible fields such as `applied_pct` from the canonical host model;
+- keeping any rename / semantics clarification effort explicit and truth-preserving.
+
+### 17. Reconcile telemetry truth with command success and stale propagation
 
 Status: active checklist item
 
 Current system can physically run while normalized telemetry still reports zero applied output.
 
-This mismatch remains a tracked issue until semantics and behavior are fully reconciled.
+This mismatch remains tracked until semantics and behavior are fully reconciled, including audit of stale or delayed bridge / pump status propagation.
 
-### 19. Audit bridge / pump status path for stale or delayed telemetry
-
-Status: active checklist item
-
-Status freshness and propagation path still need explicit audit.
-
-### 20. Audit why `transport_link_ok` intermittently drops during otherwise idle/healthy operation
+### 18. Audit why `transport_link_ok` intermittently drops during otherwise idle/healthy operation
 
 Status: active checklist item
 
 Intermittent link-state drops remain tracked and must be investigated rather than normalized away.
 
-### 21. Classify current operator-visible fields as `planned`, `requested`, `delivered`, `acknowledged`, `backend_reported`, `measured`, or `stale`
-
-Status: active checklist item
-
-This remains necessary to keep operator-visible semantics truth-preserving.
-
-### 22. Separate requested target, delivered command, backend-reported output, and real physical output in naming and architecture
-
-Status: active checklist item
-
-This remains an active naming and architecture requirement.
-
-### 20. Remove misleading host field `applied_pct` from the canonical host model
-
-Status: active checklist item
-
-Misleading host-visible fields must not remain canonical just because they are historically convenient.
-
-### 21. Add rename / semantics clarification plan for misleading status fields
-
-Status: active checklist item
-
-Any rename effort must be planned, explicit, and truth-preserving.
-
-### 22. Reduce unnecessary translation layers where the same command is reinterpreted multiple times
+### 19. Reduce unnecessary translation layers where the same command is reinterpreted multiple times
 
 Status: active checklist item
 
 Translation layers should be reduced only where meaning is preserved and ownership boundaries stay correct.
 
-### 23. Instrument and measure planner lead time before adopting planner-derived pump feedforward
+### 20. Instrument and measure planner lead time before adopting planner-derived pump feedforward
 
 Status: active checklist item
 
