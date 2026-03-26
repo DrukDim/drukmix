@@ -364,6 +364,19 @@ class Driver:
         except Exception as e:
             self.log.warning(f"initial query failed: {e}")
 
+    async def _refresh_controller_status(self):
+        try:
+            res = await self.mr.call(
+                "printer.objects.query",
+                {"objects": {"drukmix_controller": CONTROLLER_FIELDS}},
+            )
+            if isinstance(res, dict):
+                st = res.get("status", {}).get("drukmix_controller")
+                if isinstance(st, dict):
+                    self._apply_controller_status(st, time.monotonic())
+        except Exception as e:
+            self.log.warning(f"status refresh failed: {e}")
+
     def _apply_controller_status(self, st: Dict[str, Any], now: float):
         if "state" in st:
             self.status.state = str(st.get("state", self.status.state))
@@ -397,6 +410,7 @@ class Driver:
     async def _handle_remote(self, method: str, params: dict):
         now = time.monotonic()
         if method == "drukmix_status":
+            await self._refresh_controller_status()
             backend = self.backend.poll_status()
             flush_active = self.flush_until > 0.0 or self.flush_pct > 0.0
             flush_remaining = (
