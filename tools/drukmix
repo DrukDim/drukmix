@@ -32,6 +32,7 @@ DRIVER_CFG_DST="$PRINTER_CFG_DIR/drukmix_driver.cfg"
 CONTROLLER_CFG_DST="$PRINTER_CFG_DIR/drukmix_controller.cfg"
 MACROS_DST="$PRINTER_CFG_DIR/drukmix_macros.cfg"
 LEGACY_PLANNER_DST="$PRINTER_CFG_DIR/drukmix_planner.cfg"
+MAINSAIL_CFG="$PRINTER_CFG_DIR/mainsail.cfg"
 
 PRINTER_CFG="$PRINTER_CFG_DIR/printer.cfg"
 SERVICE_TEMPLATE="$REPO_DIR/systemd/drukmix.service"
@@ -132,6 +133,38 @@ install_macros_if_missing() {
 sync_macros_from_repo() {
   cp "$MACROS_TEMPLATE" "$MACROS_DST"
   echo "Synced macros from repo: $MACROS_DST"
+}
+
+patch_mainsail_pause_no_park() {
+  if [[ ! -f "$MAINSAIL_CFG" ]]; then
+    echo "Skipping mainsail pause patch: $MAINSAIL_CFG not found"
+    return 0
+  fi
+
+  MAINSAIL_CFG="$MAINSAIL_CFG" python3 - <<'PY'
+from pathlib import Path
+import os
+
+p = Path(os.environ["MAINSAIL_CFG"])
+s = p.read_text()
+
+old_pause = "  _TOOLHEAD_PARK_PAUSE_CANCEL {rawparams}\n"
+old_cancel = "  {% if (custom_park or not printer.pause_resume.is_paused) and allow_park %} _TOOLHEAD_PARK_PAUSE_CANCEL {park_x} {park_y} {% endif %}\n"
+
+changed = False
+if old_pause in s:
+    s = s.replace(old_pause, "")
+    changed = True
+if old_cancel in s:
+    s = s.replace(old_cancel, "")
+    changed = True
+
+if changed:
+    p.write_text(s)
+    print(f"Patched mainsail pause/cancel park behavior: {p}")
+else:
+    print(f"Mainsail pause/cancel park behavior already normalized: {p}")
+PY
 }
 
 remove_file_if_present() {
@@ -497,6 +530,7 @@ do_install() {
   compile_check
   install_cfg_if_missing
   sync_macros_from_repo
+  patch_mainsail_pause_no_park
   remove_file_if_present "$PRINTER_CFG_DIR/drukmix_research.cfg"
   remove_file_if_present "$LEGACY_PLANNER_DST"
   rm -f "$KLIPPER_VEXT_DST"
@@ -529,6 +563,7 @@ do_update() {
   ensure_venv
   compile_check
   sync_macros_from_repo
+  patch_mainsail_pause_no_park
   remove_file_if_present "$PRINTER_CFG_DIR/drukmix_research.cfg"
   remove_file_if_present "$PRINTER_CFG_DIR/drukmix_planner.cfg"
   rm -f "$KLIPPER_VEXT_DST"
@@ -712,6 +747,7 @@ do_cfg_reset() {
   cp "$CONTROLLER_CFG_TEMPLATE" "$CONTROLLER_CFG_DST"
   cp "$MACROS_TEMPLATE" "$MACROS_DST"
   patch_cfg_if_needed
+  patch_mainsail_pause_no_park
 
   echo "Reset driver config from template: $DRIVER_CFG_TEMPLATE -> $DRIVER_CFG_DST"
   echo "Reset controller config from template: $CONTROLLER_CFG_TEMPLATE -> $CONTROLLER_CFG_DST"

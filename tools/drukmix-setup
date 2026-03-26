@@ -59,6 +59,7 @@ CTRL_CFG_DST="${PRINTER_CFG_DIR}/drukmix_controller.cfg"
 
 DRIVER_CFG_SRC="${REPO_ROOT}/config_examples/drukmix_driver.cfg"
 DRIVER_CFG_DST="${DRUKMIX_CONFIG:-"$PRINTER_CFG_DIR/drukmix_driver.cfg"}"
+MAINSAIL_CFG_PATH="${PRINTER_CFG_DIR}/mainsail.cfg"
 
 SERVICE_NAME="drukmix.service"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}"
@@ -132,6 +133,37 @@ copy_force() {
   log "installed: $dst"
 }
 
+patch_mainsail_pause_no_park() {
+  if [[ ! -f "$MAINSAIL_CFG_PATH" ]]; then
+    log "skip mainsail pause patch (not found): $MAINSAIL_CFG_PATH"
+    return
+  fi
+  MAINSAIL_CFG_PATH="$MAINSAIL_CFG_PATH" python3 - <<'PY'
+from pathlib import Path
+import os
+
+p = Path(os.environ["MAINSAIL_CFG_PATH"])
+s = p.read_text()
+
+old_pause = "  _TOOLHEAD_PARK_PAUSE_CANCEL {rawparams}\n"
+old_cancel = "  {% if (custom_park or not printer.pause_resume.is_paused) and allow_park %} _TOOLHEAD_PARK_PAUSE_CANCEL {park_x} {park_y} {% endif %}\n"
+
+changed = False
+if old_pause in s:
+    s = s.replace(old_pause, "")
+    changed = True
+if old_cancel in s:
+    s = s.replace(old_cancel, "")
+    changed = True
+
+if changed:
+    p.write_text(s)
+    print(f"patched mainsail pause/cancel park behavior: {p}")
+else:
+    print(f"mainsail pause/cancel park behavior already normalized: {p}")
+PY
+}
+
 require_path() { [[ -e "$1" ]] || die "missing: $1"; }
 
 append_include_if_missing() {
@@ -186,6 +218,7 @@ install_configs() {
   fi
   append_include_if_missing "[include $(basename "$CTRL_CFG_DST")]" "$PRINTER_CFG_PATH"
   append_include_if_missing "[include $(basename "$MACROS_DST")]" "$PRINTER_CFG_PATH"
+  patch_mainsail_pause_no_park
 }
 
 install_service() {

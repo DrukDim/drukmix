@@ -123,6 +123,28 @@ Related areas:
 - `~/printer_data/config`
 - `~/printer_data/logs`
 
+### 5a. Upstream `mainsail.cfg` default pause/cancel park behavior conflicts with required machine semantics
+
+Status: active compatibility constraint with managed mitigation
+
+Upstream `mainsail.cfg` parks the toolhead during `PAUSE` and may also park during `CANCEL_PRINT`.
+That conflicts with the required concrete-printer behavior here: pause must finish buffered motion and stop in place, and cancel must not inject an automatic park move.
+
+Confirmed current rule:
+- helpers should detect the standard upstream park lines and remove them idempotently during install/update/reset;
+- if `mainsail.cfg` is already fixed or customized in some other equivalent way, helpers should leave it unchanged.
+
+Implication:
+
+- updates to `mainsail-config` can silently restore upstream park behavior unless the helper re-normalizes it;
+- pause/cancel behavior should be re-verified after printer-stack updates.
+
+Related areas:
+
+- `tools/drukmix`
+- `tools/drukmix-setup`
+- `~/printer_data/config/mainsail.cfg`
+
 ### 6. Bridge attachment currently depends on Linux udev alias strategy
 
 Status: active operational constraint
