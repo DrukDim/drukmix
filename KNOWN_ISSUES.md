@@ -273,32 +273,39 @@ Related areas:
 - bridge / pump-node status semantics
 - operator override verification
 
-### 9e. Direct bridge `USB_SET_FLOW` command can fail to produce any observable bridge-status update
+### 9e. Bridge-reported `pumpvfd` command success can diverge from the serial-debug truth of the connected `pump_vfd` node
 
 Status: active confirmed defect
 
-Verified on `duet` on 2026-03-26 by stopping `drukmix.service` and issuing direct host-side bridge calls through `BridgeUsbTransport`:
-- `vfd_set_run(100, False)` produced no visible change in returned bridge status;
-- repeated raw status reads continued to report identical values including:
-  - `target_milli_lpm = 0`
-  - `hw_setpoint_raw = 0`
-  - `running = false`
-  - `last_ack_seq = 22`
-  - `applied_code = 1`
-  - `bridge_t_ms = 7751000`
-- the packet content appeared effectively frozen across multiple reads taken over several seconds, even though bridge status is expected to be pushed periodically and command/ack state should evolve.
+Verified on `duet` and the directly connected `pump_vfd` serial console on 2026-03-26:
+- direct host-side bridge calls through `BridgeUsbTransport.vfd_set_run(100, False)` reported successful bridge/backend state including:
+  - `target_milli_lpm = 10000`
+  - `hw_setpoint_raw = 10000`
+  - `running = true`
+  - `last_ack_seq` incrementing
+  - `pump_state = 4`
+  - `pump_flags = 145`
+- the same test observed on the physically connected `pump_vfd` serial debug console showed no matching receive/execute transition:
+  - `target = 0`
+  - `cmd_raw = 0`
+  - `running = 0`
+  - `vfd_freq_x10 = 0`
+  - `vfd_speed_raw = 0`
+  - `vfd_current_x10 = 0`
+- the same mismatch was also observed when invoking `DRUKMIX_FLUSH PCT=100 DURATION=0` through the normal macro path.
 
 Implication:
-- the currently confirmed fault boundary is below macro/driver command acceptance;
-- the unresolved path is now specifically in bridge command application, bridge status freshness, or bridge <-> pump-node ack/status return handling;
-- this is stronger evidence than the higher-level `running=0` observation, because it reproduces even when bypassing Moonraker and the normal driver loop.
+- the currently confirmed fault boundary is below macro/driver command acceptance and below host-side bridge command issuance;
+- bridge-reported command success must not currently be treated as proof that the connected `pump_vfd` node actually received or executed the command;
+- the unresolved path is now specifically in bridge-to-node delivery, node identity/routing, or the truth semantics of bridge-side ACK/STATUS aggregation.
 
 Related areas:
 - `backend/bridge_usb_transport.py`
 - `firmware/bridge/src/main.cpp`
 - `firmware/bridge/src/espnow_link.cpp`
-- bridge USB status freshness
-- ESP-NOW ack/status return path
+- `firmware/pump_vfd/src/dmbus_pump_node.cpp`
+- bridge-to-node delivery and ACK/STATUS truth
+- ESP-NOW node identity / routing
 
 ## Active checklist
 
