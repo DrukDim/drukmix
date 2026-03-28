@@ -1,50 +1,87 @@
-# VFD docs index
+# VFD Docs Index
 
-Ця папка — базова точка правди по VFD (M900/M980) для DrukMix.
+This directory is the canonical documentation entrypoint for the current `pump_vfd` backend.
 
-## Коли що читати
+It covers:
 
-### 1. `m900_m980_shared_semantics.md`
-Читати коли:
-- міняєш логіку `pump_vfd` драйвера
-- міняєш reset fault / stop / run семантику
-- міняєш інтерпретацію status register'ів
-- міняєш host/bridge/driver логіку, яка залежить від значення `fault`, `running`, `actual freq`
+- shared M900 / M980 semantics,
+- current Modbus / RS485 driver assumptions,
+- backend-local fault meaning,
+- currently known wiring assumptions,
+- vendor reference PDFs kept inside the repository.
 
-### 2. `m900_m980_differences.md`
-Читати коли:
-- додаєш підтримку конкретної серії VFD
-- хочеш використати специфічні фічі M900 або M980
-- міняєш IO map / capability profile / max frequency / terminal assumptions
+## Read in this order
 
-### 3. `m900_m980_faults.md`
-Читати коли:
-- в терміналі Klipper або pump node прилітає код помилки
-- вирішуєш, що можна скидати автоматично, а що має паузити друк
-- документуєш fault policy
+### 1. Backend baseline
 
-### 4. `modbus_driver_contract.md`
-Читати коли:
-- міняєш архітектуру між `driver`, `bridge`, `pump_vfd`
-- міняєш state model
-- додаєш нові поля статусу або профілі VFD
+- [modbus_driver_contract.md](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/modbus_driver_contract.md)
+- [m900_m980_shared_semantics.md](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/m900_m980_shared_semantics.md)
 
-### 5. `config/vfd_profiles.yaml`
-Читати коли:
-- додаєш/правиш series profile
-- хочеш винести відмінності M900/M980 з коду в конфіг
+Read these first when:
 
-## Поточні правила проєкту
+- changing `pump_vfd` runtime behavior,
+- changing host/bridge/pump ownership boundaries,
+- changing status or fault interpretation,
+- changing recovery policy.
 
-1. Один transport / status model для M900 і M980.
-2. Відмінності між серіями тримати в profile/capabilities, а не розмазувати по коду.
-3. `running` не вважати доказом фактичного обертання.
-4. Для автоматичного recovery допустимий тільки communication-loss сценарій (`Err16` / link-loss class).
-5. Усі інші fault-и мають залишатися fault-ами оператора до окремо описаної політики.
+### 2. Series differences
 
-## Пов'язані вузли коду
+- [m900_m980_differences.md](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/m900_m980_differences.md)
 
-- `firmware/pump_vfd/`
-- `firmware/bridge/`
-- `drukmix_driver.py`
-- `README.md`
+Read this when:
+
+- adding or revising series-specific support,
+- changing assumptions about IO or capability profiles,
+- adding M900/M980-specific behavior.
+
+### 3. Fault handling
+
+- [m900_m980_faults.md](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/m900_m980_faults.md)
+
+Read this when:
+
+- fault codes appear in runtime status,
+- changing reset / recovery policy,
+- deciding what may auto-recover and what must stay operator-visible.
+
+### 4. Wiring and setup
+
+- [pump_vfd_wiring.md](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/pump_vfd_wiring.md)
+- [m980_setup_baseline.md](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/m980_setup_baseline.md)
+
+Read these when:
+
+- wiring ESP to RS485 / VFD,
+- checking MCU pin assignments,
+- confirming the minimum M980-side configuration needed for communication control.
+
+### 5. Vendor references
+
+- [manual_vfd_mdriver_m980.pdf](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/manual_vfd_mdriver_m980.pdf)
+- [manual_vfd_mdriver_m900.pdf](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/manual_vfd_mdriver_m900.pdf)
+
+These PDFs are reference material, not canonical project truth by themselves.
+Project rules should be extracted from them into short repository docs only after they are verified against real hardware behavior.
+
+## Current project rules
+
+1. One shared transport/state model for M900 and M980.
+2. Series differences belong in capability/profile logic, not scattered runtime guesses.
+3. `running` is not proof of physical shaft rotation.
+4. Auto-recovery is currently limited to communication-loss style failures only.
+5. All other process/device faults remain operator-visible unless a stricter verified policy replaces that rule.
+
+## Known documentation gaps
+
+The repository still needs clearer canonical documentation for:
+
+- exact RS485 transceiver wiring used in field hardware,
+- exact A/B/GND wiring to the VFD,
+- whether current field hardware requires explicit transceiver decoupling or special bias/termination,
+- exact M980 parameter checklist required from factory defaults for the current deployed path.
+
+## Related code
+
+- [firmware/pump_vfd/](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/firmware/pump_vfd)
+- [firmware/bridge/](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/firmware/bridge)
+- [drukmix_driver.py](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/drukmix_driver.py)
