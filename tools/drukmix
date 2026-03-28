@@ -201,6 +201,37 @@ service_state() {
   fi
 }
 
+service_runtime_state() {
+  local name="$1"
+  if ! command -v systemctl >/dev/null 2>&1; then
+    printf 'unavailable'
+    return 0
+  fi
+  if ! systemctl list-unit-files "$name" >/dev/null 2>&1; then
+    printf 'not-installed'
+    return 0
+  fi
+
+  local active sub result
+  active="$(systemctl show "$name" -p ActiveState --value 2>/dev/null || true)"
+  sub="$(systemctl show "$name" -p SubState --value 2>/dev/null || true)"
+  result="$(systemctl show "$name" -p Result --value 2>/dev/null || true)"
+
+  if [[ "$active" == "activating" && "$sub" == "auto-restart" ]]; then
+    printf 'restart-loop'
+    return 0
+  fi
+  if [[ "$active" == "failed" || "$result" == "exit-code" && "$active" != "active" ]]; then
+    printf 'failed'
+    return 0
+  fi
+  if [[ -n "$active" ]]; then
+    printf '%s' "$active"
+  else
+    printf 'unknown'
+  fi
+}
+
 moonraker_info() {
   if ! command -v curl >/dev/null 2>&1; then
     return 1
@@ -635,7 +666,23 @@ cmd_check() {
   else
     print_warn "klipper" "not ready"
   fi
-  print_info "drukmix.service" "$(service_state drukmix.service)"
+  case "$(service_runtime_state drukmix.service)" in
+    active)
+      print_ok "drukmix.service" "active"
+      ;;
+    restart-loop)
+      print_warn "drukmix.service" "restart-loop"
+      ;;
+    failed)
+      print_warn "drukmix.service" "failed"
+      ;;
+    inactive|not-installed|unavailable|unknown)
+      print_info "drukmix.service" "$(service_runtime_state drukmix.service)"
+      ;;
+    *)
+      print_info "drukmix.service" "$(service_runtime_state drukmix.service)"
+      ;;
+  esac
 
   print_header "Summary"
   case "$(compute_summary_state)" in
