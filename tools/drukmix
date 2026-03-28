@@ -101,7 +101,6 @@ compile_check() {
     "$REPO_DIR/backend/backend_pumpvfd.py" \
     "$REPO_DIR/backend/backend_pumptpl.py" \
     "$REPO_DIR/backend/bridge_usb_transport.py" \
-    "$REPO_DIR/backend/agent_core_logic.py" \
     "$REPO_DIR/backend/vfd_faults.py"
 }
 

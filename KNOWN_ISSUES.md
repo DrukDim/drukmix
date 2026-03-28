@@ -58,9 +58,9 @@ Implication:
 
 Related areas:
 
-- `drukmix_agent.py`
+- `drukmix_driver.py`
 - backend command application
-- print-state / publish logic
+- controller-to-backend command application
 
 ### 3. Pump offline handling and pause behavior are sensitive
 
@@ -80,8 +80,8 @@ Implication:
 
 Related areas:
 
-- `drukmix_agent.py`
-- orchestration pause behavior
+- `drukmix_driver.py`
+- orchestration fail-safe behavior
 - pump connectivity / transport freshness handling
 
 ### 4. Telemetry truth must not be cosmetically improved into false certainty
@@ -217,8 +217,9 @@ Implication:
 
 Related areas:
 
-- `drukmix_agent.py`
+- `drukmix_driver.py`
 - `klipper_extra/drukmix_planner_probe.py`
+- `klipper_extra/drukmix_controller.py`
 - planner lookahead policy
 - host orchestration semantics
 
@@ -254,8 +255,8 @@ Implication:
 - production contract cleanup must remove multi-horizon payload from the normal agent/probe runtime path.
 
 Related areas:
-- `drukmix_agent.py`
 - `klipper_extra/drukmix_planner_probe.py`
+- `klipper_extra/drukmix_controller.py`
 
 ### 9c. Backend mode `UNKNOWN` must block automatic orchestration until explicit mode integration is complete
 
@@ -270,7 +271,7 @@ Implication:
 
 Related areas:
 - backend-normalized status
-- `drukmix_agent.py`
+- `drukmix_driver.py`
 - runtime pause/safety logic
 
 ### 9d. Operator flush/reverse override can remain logically active while backend-reported `running` stays false
