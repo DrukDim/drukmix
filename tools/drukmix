@@ -43,6 +43,7 @@ MACROS_TEMPLATE="$REPO_DIR/config_examples/drukmix_macros.cfg"
 SERVICE_TEMPLATE="$REPO_DIR/systemd/drukmix.service"
 KLIPPER_EXTRA_SRC="$REPO_DIR/klipper_extra/drukmix_planner_probe.py"
 KLIPPER_CONTROLLER_SRC="$REPO_DIR/klipper_extra/drukmix_controller.py"
+FLASH_HELPER="$REPO_DIR/tools/flash_firmware.sh"
 SUPPORTED_PROFILES=("main" "brama" "duet")
 
 print_header() {
@@ -281,6 +282,71 @@ bridge_alias_exists() {
 
 bridge_usb_visible() {
   [[ -d /dev/serial/by-id ]] && ls /dev/serial/by-id 2>/dev/null | grep -Ei 'cp210|drukos-bridge|usb-.*bridge' >/dev/null
+}
+
+bridge_flash_candidates() {
+  local out=()
+  local path resolved
+
+  if [[ -d /dev/serial/by-id ]]; then
+    while IFS= read -r path; do
+      [[ -n "$path" ]] || continue
+      resolved="$(readlink -f "$path" 2>/dev/null || true)"
+      if [[ -n "$resolved" ]]; then
+        out+=("$resolved")
+      fi
+    done < <(find /dev/serial/by-id -maxdepth 1 -type l 2>/dev/null | sort | grep -Ei 'Silicon_Labs|CP210|drukos-bridge|bridge' || true)
+  fi
+
+  if [[ ${#out[@]} -eq 0 ]]; then
+    while IFS= read -r path; do
+      [[ -n "$path" ]] || continue
+      out+=("$path")
+    done < <(ls /dev/ttyUSB* 2>/dev/null || true)
+  fi
+
+  if [[ ${#out[@]} -gt 0 ]]; then
+    printf '%s\n' "${out[@]}" | awk '!seen[$0]++'
+  fi
+}
+
+select_bridge_flash_port() {
+  local requested="${1:-}"
+  if [[ -n "$requested" ]]; then
+    if [[ -e "$requested" ]]; then
+      printf '%s' "$requested"
+      return 0
+    fi
+    echo "Bridge flash port not found: $requested" >&2
+    return 1
+  fi
+
+  mapfile -t candidates < <(bridge_flash_candidates)
+  if [[ ${#candidates[@]} -eq 0 ]]; then
+    echo "No bridge flash candidate detected." >&2
+    echo "Connect bridge USB serial or pass a port explicitly." >&2
+    return 1
+  fi
+  if [[ ${#candidates[@]} -gt 1 ]]; then
+    echo "Multiple bridge flash candidates detected:" >&2
+    printf '  %s\n' "${candidates[@]}" >&2
+    echo "Pass the intended port explicitly: drukmix flash bridge <port>" >&2
+    return 1
+  fi
+  printf '%s' "${candidates[0]}"
+}
+
+bridge_artifacts_ready() {
+  local dir="$REPO_DIR/firmware/releases/bridge"
+  local missing=0
+  local file
+  for file in bootloader.bin partitions.bin boot_app0.bin firmware.bin; do
+    if [[ ! -f "$dir/$file" ]]; then
+      print_missing "bridge artifact" "$dir/$file"
+      missing=1
+    fi
+  done
+  [[ $missing -eq 0 ]]
 }
 
 moonraker_write_update_manager() {
@@ -609,7 +675,7 @@ Usage:
   drukmix check
   drukmix install <profile>
   drukmix uninstall
-  drukmix flash bridge        (not implemented yet)
+  drukmix flash bridge [port]
   drukmix flash tpl           (not implemented yet)
   drukmix flash vfd           (not implemented yet)
 
@@ -847,6 +913,46 @@ cmd_uninstall() {
   print_ok "state" "DrukMix uninstall completed"
 }
 
+cmd_flash_bridge() {
+  local requested_port="${1:-}"
+  local port
+
+  print_step "Preflight"
+  require_repo_layout
+  require_python
+  ensure_sudo_session
+  if [[ ! -x "$FLASH_HELPER" ]]; then
+    echo "Flash helper not found: $FLASH_HELPER"
+    exit 2
+  fi
+  if ! bridge_artifacts_ready; then
+    echo "Bridge release artifacts are incomplete."
+    exit 2
+  fi
+  port="$(select_bridge_flash_port "$requested_port")" || exit 2
+  print_ok "bridge port" "$port"
+
+  print_step "Flashing"
+  "$FLASH_HELPER" bridge "$port"
+
+  print_step "Host Integration"
+  install_bridge_udev_rule
+  reload_udev_rules
+  sleep 2
+
+  print_header "Summary"
+  if bridge_alias_exists; then
+    print_ok "bridge alias" "$BRIDGE_ALIAS"
+  else
+    print_warn "bridge alias" "missing after flash"
+  fi
+  if bridge_usb_visible; then
+    print_ok "bridge usb" "visible in /dev/serial/by-id"
+  else
+    print_warn "bridge usb" "not detected after flash"
+  fi
+}
+
 cmd="${1:-help}"
 case "$cmd" in
   help|-h|--help)
@@ -862,8 +968,19 @@ case "$cmd" in
     cmd_uninstall
     ;;
   flash)
-    echo "Not implemented yet: flash ${2:-}"
-    exit 2
+    case "${2:-}" in
+      bridge)
+        cmd_flash_bridge "${3:-}"
+        ;;
+      tpl|vfd|"")
+        echo "Not implemented yet: flash ${2:-}"
+        exit 2
+        ;;
+      *)
+        echo "Unknown flash target: ${2:-}"
+        exit 2
+        ;;
+    esac
     ;;
   *)
     cmd_help
