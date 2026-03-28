@@ -17,7 +17,7 @@ DrukMix connects print-side motion and operator commands to a concrete material 
 
 Current host control chain:
 
-`Klipper macro -> Moonraker remote method -> DrukMix agent -> backend -> bridge USB transport -> bridge node / link -> pump node -> hardware driver`
+`Klipper macro -> Moonraker remote method -> DrukMix driver -> backend -> bridge USB transport -> bridge node / link -> pump node -> hardware driver`
 
 The current deployed field path is `pumpvfd`, but the project is intended to remain multi-backend.
 
@@ -38,12 +38,14 @@ DrukMix is currently deployed from a normal repository checkout and runs directl
 Current canonical deployment layout:
 - source repo: `/home/drukos/drukmix`
 - systemd unit: `/etc/systemd/system/drukmix.service`
-- active config file: `/home/drukos/printer_data/config/drukmix.cfg`
+- active driver config file: `/home/drukos/printer_data/config/drukmix_driver.cfg`
+- active controller config file: `/home/drukos/printer_data/config/drukmix_controller.cfg`
 - active macros file: `/home/drukos/printer_data/config/drukmix_macros.cfg`
 - active printer config: `/home/drukos/printer_data/config/printer.cfg`
-- runtime log: `/home/drukos/printer_data/logs/drukmix.log`
+- runtime log: `/home/drukos/printer_data/logs/drukmix_driver.log`
 - default example config templates in repo:
-  - `config_examples/drukmix.cfg`
+  - `config_examples/drukmix_driver.cfg`
+  - `config_examples/drukmix_controller.cfg`
   - `config_examples/drukmix_macros.cfg`
 
 The live config and macro files are intentionally placed in the printer config directory so they can be viewed and edited through the normal Klipper / Mainsail config UI.
@@ -59,7 +61,7 @@ DrukMix currently assumes a deployment environment built around:
 - Klipper
 - Moonraker
 - Mainsail
-- a separate `drukmix` agent service
+- a separate `drukmix` driver service
 - a printer config directory under the active user home
 - udev-based stable serial aliasing for the bridge device
 
@@ -125,8 +127,8 @@ Current production planner contract is intentionally compact:
 - `control_velocity_mms`
 
 Current config ownership model:
-- lookahead/policy values (`pump_start_lookahead_s`, `pump_run_lookahead_s`, `pump_stop_lookahead_s`) are owned by `[drukmix]` in `drukmix.cfg`;
-- planner-probe tuning values are also owned by `[drukmix]` in `drukmix.cfg`;
+- driver runtime values are owned by `[drukmix_driver]` in `drukmix_driver.cfg`;
+- controller lookahead/policy values (`pump_start_lookahead_s`, `pump_run_lookahead_s`, `pump_stop_lookahead_s`, prestart/prestop behavior, velocity mapping) are owned by `[drukmix_controller]` in `drukmix_controller.cfg`;
 - Klipper planner-probe section is managed directly inside `printer.cfg` by the install/update helper;
 - do not create a separate `drukmix_planner.cfg` unless there is an explicit verified request to reintroduce that file.
 
@@ -164,20 +166,20 @@ Quickstart (Moonraker/Mainsail):
    path: /home/drukos/drukmix
    origin: <your-remote-url>
    primary_branch: feature/hybrid-klipper-controller
-   post_update: /home/drukos/drukmix/tools/drukmix-setup --symlink-controller
+   post_update: /home/drukos/drukmix/tools/drukmix install
    ```
    Adjust paths/user/branch as needed.
 2. After Update in Mainsail/Moonraker:
    - Klipper: `systemctl restart klipper` (reloads the controller extra)
-   - Driver agent: start/restart your service or run `DRUKMIX_CONFIG=~/printer_data/config/drukmix_agent.cfg python3 /home/drukos/drukmix/drukmix_driver.py`
-3. If you want auto-start for the driver, run `tools/drukmix-setup --install-service` once (requires root). The service is optional and can be skipped on systems without systemd.
+   - Driver: start/restart your service or run `DRUKMIX_CONFIG=~/printer_data/config/drukmix_driver.cfg python3 /home/drukos/drukmix/drukmix_driver.py`
+3. If you want auto-start for the driver, run `tools/drukmix install` once with the required privileges. The service is optional and can be skipped on systems without systemd.
 
 This keeps updates reproducible: pull via Update Manager, run the setup helper, restart services, verify.
 
 ## Status
 
 Current verified state:
-- host stack is Klipper + Moonraker + Mainsail + a separate `drukmix` agent service;
+- host stack is Klipper + Moonraker + Mainsail + a separate `drukmix` driver service;
 - deployed backend is currently `pumpvfd`;
 - the command path is working;
 - example-based live config install is working;

@@ -39,12 +39,14 @@ Current canonical deployment layout:
 
 - source repo: `/home/drukos/drukmix`
 - systemd unit: `/etc/systemd/system/drukmix.service`
-- active config file: `/home/drukos/printer_data/config/drukmix.cfg`
+- active driver config file: `/home/drukos/printer_data/config/drukmix_driver.cfg`
+- active controller config file: `/home/drukos/printer_data/config/drukmix_controller.cfg`
 - active macros file: `/home/drukos/printer_data/config/drukmix_macros.cfg`
 - active printer config: `/home/drukos/printer_data/config/printer.cfg`
-- runtime log: `/home/drukos/printer_data/logs/drukmix.log`
+- runtime log: `/home/drukos/printer_data/logs/drukmix_driver.log`
 - template/default config files in repo:
-  - `config_examples/drukmix.cfg`
+  - `config_examples/drukmix_driver.cfg`
+  - `config_examples/drukmix_controller.cfg`
   - `config_examples/drukmix_macros.cfg`
 
 These paths and roles must not be changed casually.
@@ -60,8 +62,10 @@ Current normal repository-driven deployment model is:
    - create/update `.venv`;
    - install Python dependencies;
    - install the systemd unit;
-   - install default live config/macros only if missing;
+   - install default live driver/controller config and macros only if missing;
    - patch live config paths if needed;
+   - migrate legacy DrukMix macro files that still advertise unsupported remote methods;
+   - ensure `[include drukmix_controller.cfg]` exists in `printer.cfg`;
    - ensure `[include drukmix_macros.cfg]` exists in `printer.cfg`;
    - install bridge udev rule;
    - reload udev rules;
