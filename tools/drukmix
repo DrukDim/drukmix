@@ -23,72 +23,139 @@ fi
 
 PRINTER_CFG_DIR="${PRINTER_CFG_DIR:-$USER_HOME/printer_data/config}"
 PRINTER_LOG_DIR="${PRINTER_LOG_DIR:-$USER_HOME/printer_data/logs}"
-
-DRIVER_CFG_TEMPLATE="$REPO_DIR/config_examples/drukmix_driver.cfg"
-CONTROLLER_CFG_TEMPLATE="$REPO_DIR/config_examples/drukmix_controller.cfg"
-MACROS_TEMPLATE="$REPO_DIR/config_examples/drukmix_macros.cfg"
+PRINTER_CFG="$PRINTER_CFG_DIR/printer.cfg"
+MOONRAKER_CFG="${MOONRAKER_CFG:-$PRINTER_CFG_DIR/moonraker.conf}"
+KLIPPER_DIR="${KLIPPER_DIR:-$USER_HOME/klipper}"
+MAINSAIL_CFG="$PRINTER_CFG_DIR/mainsail.cfg"
 
 DRIVER_CFG_DST="$PRINTER_CFG_DIR/drukmix_driver.cfg"
 CONTROLLER_CFG_DST="$PRINTER_CFG_DIR/drukmix_controller.cfg"
 MACROS_DST="$PRINTER_CFG_DIR/drukmix_macros.cfg"
-LEGACY_PLANNER_DST="$PRINTER_CFG_DIR/drukmix_planner.cfg"
-MAINSAIL_CFG="$PRINTER_CFG_DIR/mainsail.cfg"
-
-PRINTER_CFG="$PRINTER_CFG_DIR/printer.cfg"
-SERVICE_TEMPLATE="$REPO_DIR/systemd/drukmix.service"
 SERVICE_DST="/etc/systemd/system/drukmix.service"
-
-KLIPPER_DIR="${KLIPPER_DIR:-$USER_HOME/klipper}"
-KLIPPER_EXTRA_SRC="$REPO_DIR/klipper_extra/drukmix_planner_probe.py"
+UDEV_RULE_DST="/etc/udev/rules.d/99-drukos-bridge.rules"
 KLIPPER_EXTRA_DST="$KLIPPER_DIR/klippy/extras/drukmix_planner_probe.py"
-KLIPPER_CONTROLLER_SRC="$REPO_DIR/klipper_extra/drukmix_controller.py"
 KLIPPER_CONTROLLER_DST="$KLIPPER_DIR/klippy/extras/drukmix_controller.py"
-KLIPPER_VEXT_DST="$KLIPPER_DIR/klippy/extras/drukmix_virtual_extruder.py"
+BRIDGE_ALIAS="/dev/drukos-bridge"
+MOONRAKER_URL="${MOONRAKER_URL:-http://127.0.0.1:7125}"
+DRIVER_CFG_TEMPLATE="$REPO_DIR/config_examples/drukmix_driver.cfg"
+CONTROLLER_CFG_TEMPLATE="$REPO_DIR/config_examples/drukmix_controller.cfg"
+MACROS_TEMPLATE="$REPO_DIR/config_examples/drukmix_macros.cfg"
+SERVICE_TEMPLATE="$REPO_DIR/systemd/drukmix.service"
+KLIPPER_EXTRA_SRC="$REPO_DIR/klipper_extra/drukmix_planner_probe.py"
+KLIPPER_CONTROLLER_SRC="$REPO_DIR/klipper_extra/drukmix_controller.py"
+SUPPORTED_PROFILES=("main" "brama" "duet")
 
-require_repo() {
-  test -f "$REPO_DIR/drukmix_driver.py"
-  test -f "$DRIVER_CFG_TEMPLATE"
-  test -f "$CONTROLLER_CFG_TEMPLATE"
-  test -f "$MACROS_TEMPLATE"
-  test -f "$SERVICE_TEMPLATE"
+print_header() {
+  printf '\n== %s ==\n' "$1"
 }
 
-require_paths() {
-  if [[ ! -d "$PRINTER_CFG_DIR" ]]; then
-    echo "Printer config dir not found: $PRINTER_CFG_DIR"
-    exit 2
+print_ok() {
+  printf 'OK      %-24s %s\n' "$1" "$2"
+}
+
+print_warn() {
+  printf 'WARN    %-24s %s\n' "$1" "$2"
+}
+
+print_missing() {
+  printf 'MISSING %-24s %s\n' "$1" "$2"
+}
+
+print_info() {
+  printf 'INFO    %-24s %s\n' "$1" "$2"
+}
+
+print_step() {
+  printf '\n-- %s --\n' "$1"
+}
+
+file_state() {
+  local path="$1"
+  if [[ -e "$path" ]]; then
+    print_ok "$2" "$path"
+  else
+    print_missing "$2" "$path"
   fi
-  if [[ ! -d "$PRINTER_LOG_DIR" ]]; then
-    echo "Printer log dir not found: $PRINTER_LOG_DIR"
-    exit 2
+}
+
+git_value() {
+  local args=("$@")
+  if git -C "$REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git -C "$REPO_DIR" "${args[@]}" 2>/dev/null || true
   fi
-  if [[ ! -f "$PRINTER_CFG" ]]; then
-    echo "printer.cfg not found: $PRINTER_CFG"
+}
+
+repo_branch() {
+  git_value branch --show-current
+}
+
+repo_commit() {
+  git_value rev-parse --short HEAD
+}
+
+repo_dirty() {
+  local out
+  out="$(git_value status --short)"
+  if [[ -n "$out" ]]; then
+    printf 'dirty'
+  else
+    printf 'clean'
+  fi
+}
+
+require_repo_layout() {
+  local missing=0
+  for path in \
+    "$REPO_DIR/drukmix_driver.py" \
+    "$DRIVER_CFG_TEMPLATE" \
+    "$CONTROLLER_CFG_TEMPLATE" \
+    "$MACROS_TEMPLATE" \
+    "$SERVICE_TEMPLATE" \
+    "$KLIPPER_EXTRA_SRC" \
+    "$KLIPPER_CONTROLLER_SRC"
+  do
+    if [[ ! -e "$path" ]]; then
+      print_missing "repo file" "$path"
+      missing=1
+    fi
+  done
+  if [[ $missing -ne 0 ]]; then
     exit 2
   fi
 }
 
-ensure_python() {
+require_python() {
   if ! command -v python3 >/dev/null 2>&1; then
     echo "python3 not found"
     exit 2
   fi
   if ! python3 -m venv --help >/dev/null 2>&1; then
     echo "python3-venv is required"
-    echo "Install with: sudo apt-get update && sudo apt-get install -y python3-venv"
     exit 2
   fi
 }
 
-ensure_venv() {
-  ensure_python
+require_printer_stack_paths() {
+  for path in "$PRINTER_CFG_DIR" "$PRINTER_LOG_DIR" "$KLIPPER_DIR" "$KLIPPER_DIR/klippy/extras"; do
+    if [[ ! -e "$path" ]]; then
+      echo "Required path not found: $path"
+      exit 2
+    fi
+  done
+  for path in "$PRINTER_CFG" "$MOONRAKER_CFG"; do
+    if [[ ! -f "$path" ]]; then
+      echo "Required file not found: $path"
+      exit 2
+    fi
+  done
+}
 
+ensure_venv() {
+  require_python
   if [[ ! -x "$REPO_DIR/.venv/bin/python" ]]; then
     python3 -m venv "$REPO_DIR/.venv"
   fi
-
   "$REPO_DIR/.venv/bin/python" -m pip install --upgrade pip setuptools wheel
-
   if [[ -f "$REPO_DIR/requirements.txt" ]]; then
     "$REPO_DIR/.venv/bin/pip" install -r "$REPO_DIR/requirements.txt"
   fi
@@ -104,103 +171,132 @@ compile_check() {
     "$REPO_DIR/backend/vfd_faults.py"
 }
 
-install_cfg_if_missing() {
-  if [[ ! -f "$DRIVER_CFG_DST" ]]; then
-    cp "$DRIVER_CFG_TEMPLATE" "$DRIVER_CFG_DST"
-    echo "Installed default driver config: $DRIVER_CFG_DST"
-  else
-    echo "Keeping existing driver config: $DRIVER_CFG_DST"
-  fi
-
-  if [[ ! -f "$CONTROLLER_CFG_DST" ]]; then
-    cp "$CONTROLLER_CFG_TEMPLATE" "$CONTROLLER_CFG_DST"
-    echo "Installed default controller config: $CONTROLLER_CFG_DST"
-  else
-    echo "Keeping existing controller config: $CONTROLLER_CFG_DST"
-  fi
+profile_supported() {
+  local profile="$1"
+  local item
+  for item in "${SUPPORTED_PROFILES[@]}"; do
+    if [[ "$item" == "$profile" ]]; then
+      return 0
+    fi
+  done
+  return 1
 }
 
-install_macros_if_missing() {
-  if [[ ! -f "$MACROS_DST" ]]; then
-    cp "$MACROS_TEMPLATE" "$MACROS_DST"
-    echo "Installed default macros: $MACROS_DST"
-  else
-    echo "Keeping existing macros: $MACROS_DST"
-  fi
-}
-
-sync_macros_from_repo() {
-  cp "$MACROS_TEMPLATE" "$MACROS_DST"
-  echo "Synced macros from repo: $MACROS_DST"
-}
-
-patch_mainsail_pause_no_park() {
-  if [[ ! -f "$MAINSAIL_CFG" ]]; then
-    echo "Skipping mainsail pause patch: $MAINSAIL_CFG not found"
+service_state() {
+  local name="$1"
+  if ! command -v systemctl >/dev/null 2>&1; then
+    printf 'unavailable'
     return 0
   fi
+  if ! systemctl list-unit-files "$name" >/dev/null 2>&1; then
+    printf 'not-installed'
+    return 0
+  fi
+  local active
+  active="$(systemctl is-active "$name" 2>/dev/null || true)"
+  if [[ -z "$active" ]]; then
+    printf 'not-installed'
+  else
+    printf '%s' "$active"
+  fi
+}
 
-  MAINSAIL_CFG="$MAINSAIL_CFG" python3 - <<'PY'
+moonraker_info() {
+  if ! command -v curl >/dev/null 2>&1; then
+    return 1
+  fi
+  curl -fsS "$MOONRAKER_URL/server/info" 2>/dev/null || return 1
+}
+
+moonraker_reachable() {
+  moonraker_info >/dev/null
+}
+
+klipper_ready() {
+  local info
+  info="$(moonraker_info || true)"
+  [[ "$info" == *'"klippy_state":"ready"'* ]]
+}
+
+has_moonraker_update_manager() {
+  [[ -f "$MOONRAKER_CFG" ]] && grep -Fq "[update_manager drukmix]" "$MOONRAKER_CFG"
+}
+
+printer_cfg_has_line() {
+  local needle="$1"
+  [[ -f "$PRINTER_CFG" ]] && grep -Fqx "$needle" "$PRINTER_CFG"
+}
+
+printer_cfg_has_managed_probe_block() {
+  [[ -f "$PRINTER_CFG" ]] \
+    && grep -Fq "# --- drukmix planner probe (managed): begin ---" "$PRINTER_CFG" \
+    && grep -Fq "# --- drukmix planner probe (managed): end ---" "$PRINTER_CFG"
+}
+
+bridge_alias_exists() {
+  [[ -e "$BRIDGE_ALIAS" || -L "$BRIDGE_ALIAS" ]]
+}
+
+bridge_usb_visible() {
+  [[ -d /dev/serial/by-id ]] && ls /dev/serial/by-id 2>/dev/null | grep -Ei 'cp210|drukos-bridge|usb-.*bridge' >/dev/null
+}
+
+moonraker_write_update_manager() {
+  MOONRAKER_CFG="$MOONRAKER_CFG" USER_HOME="$USER_HOME" python3 - <<'PY'
 from pathlib import Path
 import os
 
-p = Path(os.environ["MAINSAIL_CFG"])
-s = p.read_text()
+p = Path(os.environ["MOONRAKER_CFG"])
+user_home = os.environ["USER_HOME"]
+text = p.read_text()
+section = f"""[update_manager drukmix]
+type: git_repo
+path: {user_home}/drukmix
+origin: https://github.com/DrukDim/drukmix.git
+primary_branch: main
+"""
 
-old_pause = "  _TOOLHEAD_PARK_PAUSE_CANCEL {rawparams}\n"
-old_cancel = "  {% if (custom_park or not printer.pause_resume.is_paused) and allow_park %} _TOOLHEAD_PARK_PAUSE_CANCEL {park_x} {park_y} {% endif %}\n"
+lines = text.splitlines()
+out = []
+i = 0
+while i < len(lines):
+    if lines[i].strip() == "[update_manager drukmix]":
+        i += 1
+        while i < len(lines) and not (lines[i].startswith("[") and lines[i].endswith("]")):
+            i += 1
+        while i < len(lines) and lines[i].strip() == "":
+            i += 1
+        continue
+    out.append(lines[i])
+    i += 1
 
-changed = False
-if old_pause in s:
-    s = s.replace(old_pause, "")
-    changed = True
-if old_cancel in s:
-    s = s.replace(old_cancel, "")
-    changed = True
-
-if changed:
-    p.write_text(s)
-    print(f"Patched mainsail pause/cancel park behavior: {p}")
-else:
-    print(f"Mainsail pause/cancel park behavior already normalized: {p}")
+new_text = "\n".join(out).rstrip() + "\n\n" + section
+p.write_text(new_text)
 PY
 }
 
-remove_file_if_present() {
-  local path="$1"
-  rm -f "$path"
+install_cfg_if_missing() {
+  if [[ ! -f "$DRIVER_CFG_DST" ]]; then
+    cp "$DRIVER_CFG_TEMPLATE" "$DRIVER_CFG_DST"
+    print_ok "driver cfg" "installed"
+  else
+    print_info "driver cfg" "kept existing"
+  fi
+  if [[ ! -f "$CONTROLLER_CFG_DST" ]]; then
+    cp "$CONTROLLER_CFG_TEMPLATE" "$CONTROLLER_CFG_DST"
+    print_ok "controller cfg" "installed"
+  else
+    print_info "controller cfg" "kept existing"
+  fi
+  if [[ ! -f "$MACROS_DST" ]]; then
+    cp "$MACROS_TEMPLATE" "$MACROS_DST"
+    print_ok "macros cfg" "installed"
+  else
+    print_info "macros cfg" "kept existing"
+  fi
 }
 
-sync_repo_ff_only() {
-  if ! git -C "$REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    return 0
-  fi
-  if ! git -C "$REPO_DIR" remote get-url origin >/dev/null 2>&1; then
-    return 0
-  fi
-
-  if ! git -C "$REPO_DIR" pull --ff-only; then
-    echo "WARNING: install could not fast-forward repo (dirty tree or divergence), continuing with current checkout"
-  fi
-}
-
-remove_include_line() {
-  local include_line="$1"
-  PRINTER_CFG="$PRINTER_CFG" INCLUDE_LINE="$include_line" python3 - <<'PY2'
-from pathlib import Path
-import os
-
-p = Path(os.environ["PRINTER_CFG"])
-needle = os.environ["INCLUDE_LINE"]
-
-lines = p.read_text().splitlines()
-out = [line for line in lines if line.strip() != needle]
-p.write_text("\n".join(out) + "\n")
-print(f"normalized {p} without {needle}")
-PY2
-}
-
-patch_cfg_if_needed() {
+patch_driver_cfg() {
   DRIVER_CFG_DST="$DRIVER_CFG_DST" USER_HOME="$USER_HOME" PRINTER_LOG_DIR="$PRINTER_LOG_DIR" python3 - <<'PY'
 from pathlib import Path
 import os
@@ -209,9 +305,7 @@ p = Path(os.environ["DRIVER_CFG_DST"])
 user_home = os.environ["USER_HOME"]
 log_dir = os.environ["PRINTER_LOG_DIR"]
 log_file = f"{log_dir}/drukmix_driver.log"
-
 s = p.read_text()
-
 repl = {
     "/home/dan/": user_home + "/",
     "/home/drukos/": user_home + "/",
@@ -221,214 +315,143 @@ repl = {
     "log_file = /home/dan/printer_data/logs/drukmix_driver.log": f"log_file = {log_file}",
     "log_file = /root/printer_data/logs/drukmix_driver.log": f"log_file = {log_file}",
 }
-
 for a, b in repl.items():
     s = s.replace(a, b)
-
+if "client_name =" not in s:
+    s += "\nclient_name = drukmix_driver\nclient_version = 1.0\nclient_type = agent\nclient_url = http://127.0.0.1\n"
 if "log_file =" not in s:
     s += f"\nlog_file = {log_file}\n"
-
-if "client_name =" not in s:
-    s += "\nclient_name = drukmix_driver\n"
-if "client_version =" not in s:
-    s += "client_version = 1.0\n"
-if "client_type =" not in s:
-    s += "client_type = agent\n"
-if "client_url =" not in s:
-    s += "client_url = http://127.0.0.1\n"
-
 p.write_text(s)
-print(f"patched {p}")
 PY
 }
 
-ensure_include_once() {
-  local include_line="$1"
-  PRINTER_CFG="$PRINTER_CFG" INCLUDE_LINE="$include_line" python3 - <<'PY'
+install_klipper_extras() {
+  install -m 0644 "$KLIPPER_EXTRA_SRC" "$KLIPPER_EXTRA_DST"
+  install -m 0644 "$KLIPPER_CONTROLLER_SRC" "$KLIPPER_CONTROLLER_DST"
+}
+
+install_service_unit() {
+  local rendered
+  rendered="$(mktemp)"
+  sed \
+    -e "s|^User=.*$|User=${USER_NAME}|" \
+    -e "s|^WorkingDirectory=.*$|WorkingDirectory=${REPO_DIR}|" \
+    -e "s|^Environment=.*$|Environment=DRUKMIX_CONFIG=${DRIVER_CFG_DST}|" \
+    -e "s|^ExecStart=.*$|ExecStart=${REPO_DIR}/.venv/bin/python ${REPO_DIR}/drukmix_driver.py|" \
+    "$SERVICE_TEMPLATE" > "$rendered"
+  sudo install -m 0644 "$rendered" "$SERVICE_DST"
+  rm -f "$rendered"
+  sudo systemctl daemon-reload
+}
+
+install_bridge_udev_rule() {
+  sudo mkdir -p "$(dirname "$UDEV_RULE_DST")"
+  sudo tee "$UDEV_RULE_DST" >/dev/null <<'EOF'
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", ATTRS{serial}=="0001", SYMLINK+="drukos-bridge", MODE:="0660", GROUP:="dialout"
+EOF
+  sudo chmod 0644 "$UDEV_RULE_DST"
+}
+
+reload_udev_rules() {
+  if command -v udevadm >/dev/null 2>&1; then
+    sudo udevadm control --reload-rules >/dev/null 2>&1 || true
+    sudo udevadm trigger >/dev/null 2>&1 || true
+    udevadm settle >/dev/null 2>&1 || true
+  fi
+}
+
+patch_mainsail_pause_no_park() {
+  if [[ ! -f "$MAINSAIL_CFG" ]]; then
+    return 0
+  fi
+  MAINSAIL_CFG="$MAINSAIL_CFG" python3 - <<'PY'
 from pathlib import Path
 import os
 
-p = Path(os.environ["PRINTER_CFG"])
-needle = os.environ["INCLUDE_LINE"]
-
-lines = p.read_text().splitlines()
-out = []
-seen = False
-
-for line in lines:
-    if line.strip() == needle:
-        if seen:
-            continue
-        seen = True
-    out.append(line)
-
-if not seen:
-    out.append(needle)
-
-p.write_text("\n".join(out) + "\n")
-print(f"normalized {p} with {needle}")
+p = Path(os.environ["MAINSAIL_CFG"])
+s = p.read_text()
+old_pause = "  _TOOLHEAD_PARK_PAUSE_CANCEL {rawparams}\n"
+old_cancel = "  {% if (custom_park or not printer.pause_resume.is_paused) and allow_park %} _TOOLHEAD_PARK_PAUSE_CANCEL {park_x} {park_y} {% endif %}\n"
+changed = False
+if old_pause in s:
+    s = s.replace(old_pause, "")
+    changed = True
+if old_cancel in s:
+    s = s.replace(old_cancel, "")
+    changed = True
+if changed:
+    p.write_text(s)
 PY
 }
 
-normalize_controller_cfg() {
-  CONTROLLER_CFG_DST="$CONTROLLER_CFG_DST" python3 - <<'PY'
-from pathlib import Path
-import os
-
-p = Path(os.environ["CONTROLLER_CFG_DST"])
-if not p.exists():
-    raise SystemExit(0)
-
-lines = p.read_text().splitlines()
-out = []
-for line in lines:
-    stripped = line.strip()
-    if not stripped:
-        out.append(line)
-        continue
-    if stripped.startswith("#"):
-        if "Planner probe tuning" in stripped or "planner_probe_" in stripped:
-            continue
-        out.append(line)
-        continue
-    key = stripped.split(":", 1)[0].split("=", 1)[0].strip()
-    if key in (
-        "planner_probe_host_buffer_target_s",
-        "planner_probe_print_velocity_epsilon",
-        "planner_probe_print_gap_merge_s",
-    ):
-        continue
-    out.append(line)
-
-p.write_text("\n".join(out) + "\n")
-print(f"normalized {p} without planner probe keys")
-PY
-}
-
-ensure_required_includes() {
-  ensure_include_once "[include drukmix_controller.cfg]"
-  ensure_include_once "[include drukmix_macros.cfg]"
-  remove_include_line "[include drukmix_research.cfg]"
-  remove_include_line "[include drukmix_planner.cfg]"
-  ensure_planner_probe_section
-}
-
-ensure_planner_probe_section() {
+ensure_printer_integration() {
   PRINTER_CFG="$PRINTER_CFG" CONTROLLER_CFG_DST="$CONTROLLER_CFG_DST" python3 - <<'PY'
 from pathlib import Path
+import configparser
 import os
 import re
-import configparser
 
 p = Path(os.environ["PRINTER_CFG"])
+controller_cfg = Path(os.environ["CONTROLLER_CFG_DST"])
 s = p.read_text()
 
-controller_cfg = Path(os.environ.get("CONTROLLER_CFG_DST", ""))
-pump_start_lookahead_s = 3.0
-host_buffer_target_s = 0.0
-print_velocity_epsilon = 0.001
-print_gap_merge_s = 0.75
-if controller_cfg.exists():
-  cp = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
-  try:
-    cp.read(controller_cfg)
-    if cp.has_section("drukmix_controller"):
-      pump_start_lookahead_s = cp.getfloat("drukmix_controller", "pump_start_lookahead_s", fallback=3.0)
-  except Exception:
-    pump_start_lookahead_s = 3.0
-
-if host_buffer_target_s <= 0.0:
-  host_buffer_target_s = pump_start_lookahead_s
-
-host_buffer_target_s = max(0.0, min(30.0, float(host_buffer_target_s)))
-print_velocity_epsilon = max(0.0, min(0.1, float(print_velocity_epsilon)))
-print_gap_merge_s = max(0.0, min(30.0, float(print_gap_merge_s)))
-
+for needle in ("[include drukmix_controller.cfg]", "[include drukmix_macros.cfg]"):
+    lines = s.splitlines()
+    if needle not in [line.strip() for line in lines]:
+        s = s.rstrip("\n") + "\n" + needle + "\n"
 
 begin = "# --- drukmix planner probe (managed): begin ---"
 end = "# --- drukmix planner probe (managed): end ---"
+if begin in s and end in s:
+    a = s.index(begin)
+    b = s.index(end) + len(end)
+    s = (s[:a] + s[b:]).rstrip("\n") + "\n"
+
+s = re.sub(r"(?ms)^\[drukmix_planner_probe\]\s*\n.*?(?=^\[|\Z)", "", s).rstrip("\n")
+
+host_buffer_target_s = 3.0
+cp = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
+if controller_cfg.exists():
+    try:
+        cp.read(controller_cfg)
+        if cp.has_section("drukmix_controller"):
+            host_buffer_target_s = cp.getfloat("drukmix_controller", "pump_start_lookahead_s", fallback=3.0)
+    except Exception:
+        host_buffer_target_s = 3.0
+
 block = f"""# --- drukmix planner probe (managed): begin ---
 [drukmix_planner_probe]
 extruder = extruder
 debug_enabled = False
 debug_every_n_moves = 200
-print_velocity_epsilon = {print_velocity_epsilon:.6f}
-print_gap_merge_s = {print_gap_merge_s:.3f}
+print_velocity_epsilon = 0.001000
+print_gap_merge_s = 0.750
 host_buffer_target_s = {host_buffer_target_s:.3f}
 # --- drukmix planner probe (managed): end ---"""
 
-# Remove any old managed block variant.
-if begin in s and end in s:
-  a = s.index(begin)
-  b = s.index(end) + len(end)
-  s = (s[:a] + s[b:]).rstrip("\n") + "\n"
-
-# Remove any unmanaged/legacy probe sections (including stale keys).
-section_re = re.compile(r"(?ms)^\[drukmix_planner_probe\]\s*\n.*?(?=^\[|\Z)")
-s = section_re.sub("", s).rstrip("\n")
-
-# Insert exactly one canonical managed section.
-s = s + "\n\n" + block + "\n"
-
+s = s.rstrip("\n") + "\n\n" + block + "\n"
 p.write_text(s)
-print(f"normalized {p} with managed [drukmix_planner_probe] section")
 PY
 }
 
-remove_managed_planner_probe_section() {
-  PRINTER_CFG="$PRINTER_CFG" python3 - <<'PY'
-from pathlib import Path
-import os
-
-p = Path(os.environ["PRINTER_CFG"])
-s = p.read_text()
-
-begin = "# --- drukmix planner probe (managed): begin ---"
-end = "# --- drukmix planner probe (managed): end ---"
-
-if begin in s and end in s:
-    a = s.index(begin)
-    b = s.index(end) + len(end)
-    s = (s[:a] + s[b:]).strip("\n") + "\n"
-    p.write_text(s)
-    print(f"normalized {p} without managed [drukmix_planner_probe] section")
-PY
+restart_moonraker_if_possible() {
+  if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files moonraker.service >/dev/null 2>&1; then
+    sudo systemctl restart moonraker.service || true
+  fi
 }
 
-install_service() {
-  local rendered
-  rendered="$(mktemp)"
-
-  # Render unit for current host user and actual repo/config paths.
-  sed \
-    -e "s|^User=.*$|User=${USER_NAME}|" \
-    -e "s|^WorkingDirectory=.*$|WorkingDirectory=${REPO_DIR}|" \
-    -e "s|^Environment=.*$|Environment=DRUKMIX_CONFIG=${PRINTER_CFG_DIR}/drukmix_driver.cfg|" \
-    -e "s|^ExecStart=.*$|ExecStart=${REPO_DIR}/.venv/bin/python ${REPO_DIR}/drukmix_driver.py|" \
-    "$SERVICE_TEMPLATE" > "$rendered"
-
-  sudo install -m 0644 "$rendered" "$SERVICE_DST"
-  rm -f "$rendered"
-  sudo systemctl daemon-reload
-  sudo systemctl enable drukmix.service >/dev/null 2>&1 || true
-}
-
-
-
-restart_service() {
-  sudo systemctl restart drukmix.service
-}
-
-restart_klipper() {
-  curl -s -X POST localhost:7125/printer/gcode/script \
-    -H 'Content-Type: application/json' \
-    -d '{"script":"RESTART"}' >/dev/null
+restart_klipper_if_possible() {
+  if moonraker_reachable; then
+    curl -fsS -X POST "$MOONRAKER_URL/printer/gcode/script" \
+      -H 'Content-Type: application/json' \
+      -d '{"script":"RESTART"}' >/dev/null || true
+  fi
 }
 
 wait_klipper_ready() {
   local n=0
-  while [[ $n -lt 60 ]]; do
-    if curl -s localhost:7125/server/info | grep -q '"klippy_state":"ready"'; then
+  while [[ $n -lt 30 ]]; do
+    if klipper_ready; then
       return 0
     fi
     sleep 1
@@ -437,344 +460,333 @@ wait_klipper_ready() {
   return 1
 }
 
-wait_for_bridge_alias() {
-  local n=0
-  while [[ $n -lt 20 ]]; do
-    if [[ -e /dev/drukos-bridge ]]; then
-      return 0
-    fi
-    sleep 0.5
-    n=$((n+1))
-  done
-  return 1
+enable_runtime_if_ready() {
+  if bridge_alias_exists; then
+    sudo systemctl enable drukmix.service >/dev/null 2>&1 || true
+    sudo systemctl restart drukmix.service
+    print_ok "runtime" "drukmix.service enabled and started"
+  else
+    sudo systemctl disable drukmix.service >/dev/null 2>&1 || true
+    print_warn "runtime" "bridge missing, service not started"
+  fi
 }
 
-install_bridge_udev_rule() {
-  local rules_dir="/etc/udev/rules.d"
-  local rules_file="${rules_dir}/99-drukos-bridge.rules"
+remove_file_if_exists() {
+  local path="$1"
+  if [[ -e "$path" || -L "$path" ]]; then
+    rm -f "$path"
+  fi
+}
 
-  sudo mkdir -p "${rules_dir}"
-  sudo tee "${rules_file}" >/dev/null <<'EOF'
-SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", ATTRS{serial}=="0001", SYMLINK+="drukos-bridge", MODE:="0660", GROUP:="dialout"
+remove_update_manager_section() {
+  MOONRAKER_CFG="$MOONRAKER_CFG" python3 - <<'PY'
+from pathlib import Path
+import os
+
+p = Path(os.environ["MOONRAKER_CFG"])
+if not p.exists():
+    raise SystemExit(0)
+lines = p.read_text().splitlines()
+out = []
+i = 0
+while i < len(lines):
+    if lines[i].strip() == "[update_manager drukmix]":
+        i += 1
+        while i < len(lines) and not (lines[i].startswith("[") and lines[i].endswith("]")):
+            i += 1
+        while i < len(lines) and lines[i].strip() == "":
+            i += 1
+        continue
+    out.append(lines[i])
+    i += 1
+p.write_text("\n".join(out).rstrip() + "\n")
+PY
+}
+
+remove_printer_integration() {
+  PRINTER_CFG="$PRINTER_CFG" python3 - <<'PY'
+from pathlib import Path
+import os
+
+p = Path(os.environ["PRINTER_CFG"])
+if not p.exists():
+    raise SystemExit(0)
+s = p.read_text()
+for needle in ("[include drukmix_controller.cfg]\n", "[include drukmix_macros.cfg]\n"):
+    s = s.replace(needle, "")
+begin = "# --- drukmix planner probe (managed): begin ---"
+end = "# --- drukmix planner probe (managed): end ---"
+if begin in s and end in s:
+    a = s.index(begin)
+    b = s.index(end) + len(end)
+    s = (s[:a] + s[b:]).rstrip("\n") + "\n"
+p.write_text(s)
+PY
+}
+
+compute_summary_state() {
+  if [[ ! -f "$DRIVER_CFG_DST" && ! -f "$CONTROLLER_CFG_DST" && ! -f "$MACROS_DST" && ! -f "$SERVICE_DST" ]]; then
+    printf 'NOT_INSTALLED'
+    return 0
+  fi
+  if ! klipper_ready; then
+    printf 'BLOCKED'
+    return 0
+  fi
+  if bridge_alias_exists && [[ "$(service_state drukmix.service)" == "active" ]]; then
+    printf 'READY'
+    return 0
+  fi
+  printf 'PARTIAL'
+}
+
+cmd_help() {
+  cat <<'EOF'
+DrukMix CLI
+
+Usage:
+  drukmix help
+  drukmix check
+  drukmix install <profile>
+  drukmix uninstall
+  drukmix flash bridge        (not implemented yet)
+  drukmix flash tpl           (not implemented yet)
+  drukmix flash vfd           (not implemented yet)
+
+Profiles:
+  main
+  brama
+  duet
+
+Notes:
+  - This tool works from the local repo checkout.
+  - Repo updates are expected to come from Moonraker update_manager.
+  - For an easier shell command, run: ./tools/drukmix-setup
 EOF
-  sudo chmod 0644 "${rules_file}"
 }
 
-reload_udev_rules() {
-  if ! command -v udevadm >/dev/null 2>&1; then
-    return 0
-  fi
-
-  local rc=0
-
-  sudo udevadm control --reload-rules >/dev/null 2>&1 || rc=$?
-  if [[ $rc -ne 0 ]]; then
-    echo "WARNING: udevadm control failed (rc=$rc), continuing"
-  fi
-
-  rc=0
-  sudo udevadm trigger >/dev/null 2>&1 || rc=$?
-  if [[ $rc -ne 0 ]]; then
-    echo "WARNING: udevadm trigger failed (rc=$rc), continuing"
-  fi
-
-  rc=0
-  udevadm settle >/dev/null 2>&1 || rc=$?
-  if [[ $rc -ne 0 ]]; then
-    echo "WARNING: udevadm settle failed (rc=$rc), continuing"
-  fi
-}
-
-install_klipper_extra_if_present() {
-  if [[ ! -f "$KLIPPER_EXTRA_SRC" ]]; then
-    echo "klipper extra source missing: $KLIPPER_EXTRA_SRC"
-    return 0
-  fi
-
-  if [[ ! -d "$KLIPPER_DIR/klippy/extras" ]]; then
-    echo "klipper extras dir not found, skipping planner extra: $KLIPPER_DIR/klippy/extras"
-    return 0
-  fi
-
-  install -m 0644 "$KLIPPER_EXTRA_SRC" "$KLIPPER_EXTRA_DST"
-  echo "installed planner klipper extra: $KLIPPER_EXTRA_DST"
-  if [[ -f "$KLIPPER_CONTROLLER_SRC" ]]; then
-    install -m 0644 "$KLIPPER_CONTROLLER_SRC" "$KLIPPER_CONTROLLER_DST"
-    echo "installed controller klipper extra: $KLIPPER_CONTROLLER_DST"
-  fi
-
-}
-
-bridge_status() {
-  if [[ -L /dev/drukos-bridge || -e /dev/drukos-bridge ]]; then
-    echo "bridge alias: ok (/dev/drukos-bridge)"
-    readlink -f /dev/drukos-bridge 2>/dev/null | sed 's/^/bridge target: /'
+cmd_check() {
+  print_header "Repo"
+  if git -C "$REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    print_ok "path" "$REPO_DIR"
+    print_info "branch" "$(repo_branch)"
+    print_info "commit" "$(repo_commit)"
+    if [[ "$(repo_dirty)" == "clean" ]]; then
+      print_ok "worktree" "clean"
+    else
+      print_warn "worktree" "dirty"
+    fi
   else
-    echo "bridge alias: missing (/dev/drukos-bridge)"
+    print_missing "repo" "$REPO_DIR"
   fi
 
-  if [[ -d /dev/serial/by-id ]]; then
-    echo "serial by-id:"
-    ls -1 /dev/serial/by-id 2>/dev/null | sed 's/^/  /' || true
+  print_header "Host Install"
+  file_state "$DRIVER_CFG_DST" "driver cfg"
+  file_state "$CONTROLLER_CFG_DST" "controller cfg"
+  file_state "$MACROS_DST" "macros cfg"
+  file_state "$SERVICE_DST" "service unit"
+  file_state "$UDEV_RULE_DST" "bridge udev"
+  if has_moonraker_update_manager; then
+    print_ok "moonraker entry" "$MOONRAKER_CFG"
   else
-    echo "serial by-id: missing dir"
+    print_missing "moonraker entry" "$MOONRAKER_CFG"
   fi
+
+  print_header "Klipper Integration"
+  file_state "$KLIPPER_EXTRA_DST" "planner extra"
+  file_state "$KLIPPER_CONTROLLER_DST" "controller extra"
+  if printer_cfg_has_line "[include drukmix_controller.cfg]"; then
+    print_ok "controller include" "$PRINTER_CFG"
+  else
+    print_missing "controller include" "$PRINTER_CFG"
+  fi
+  if printer_cfg_has_line "[include drukmix_macros.cfg]"; then
+    print_ok "macros include" "$PRINTER_CFG"
+  else
+    print_missing "macros include" "$PRINTER_CFG"
+  fi
+  if printer_cfg_has_managed_probe_block; then
+    print_ok "managed probe" "$PRINTER_CFG"
+  else
+    print_missing "managed probe" "$PRINTER_CFG"
+  fi
+
+  print_header "Hardware"
+  if bridge_alias_exists; then
+    print_ok "bridge alias" "$BRIDGE_ALIAS"
+  else
+    print_missing "bridge alias" "$BRIDGE_ALIAS"
+  fi
+  if bridge_usb_visible; then
+    print_ok "bridge usb" "visible in /dev/serial/by-id"
+  else
+    print_warn "bridge usb" "not detected"
+  fi
+  print_info "pump" "unknown"
+
+  print_header "Runtime"
+  if moonraker_reachable; then
+    print_ok "moonraker" "$MOONRAKER_URL"
+  else
+    print_missing "moonraker" "$MOONRAKER_URL"
+  fi
+  if klipper_ready; then
+    print_ok "klipper" "ready"
+  else
+    print_warn "klipper" "not ready"
+  fi
+  print_info "drukmix.service" "$(service_state drukmix.service)"
+
+  print_header "Summary"
+  case "$(compute_summary_state)" in
+    READY)
+      print_ok "state" "READY"
+      ;;
+    PARTIAL)
+      print_warn "state" "PARTIAL"
+      print_info "next step" "install runtime or connect bridge hardware"
+      ;;
+    BLOCKED)
+      print_warn "state" "BLOCKED"
+      print_info "next step" "restore klipper/moonraker readiness first"
+      ;;
+    *)
+      print_info "state" "NOT_INSTALLED"
+      print_info "next step" "run 'drukmix install <profile>'"
+      ;;
+  esac
 }
 
-do_install() {
-  require_repo
-  require_paths
-  sync_repo_ff_only
+cmd_install() {
+  local profile="${1:-}"
+  if [[ -z "$profile" ]]; then
+    echo "Usage: drukmix install <profile>"
+    exit 2
+  fi
+  if ! profile_supported "$profile"; then
+    echo "Unsupported profile: $profile"
+    exit 2
+  fi
+
+  print_step "Preflight"
+  require_repo_layout
+  require_printer_stack_paths
+  require_python
+  if [[ "$profile" != "main" ]]; then
+    print_info "profile" "$profile uses core install only for now"
+  fi
+
+  print_step "Python Environment"
   ensure_venv
   compile_check
+  print_ok "venv" "$REPO_DIR/.venv"
+
+  print_step "Core Install"
   install_cfg_if_missing
-  sync_macros_from_repo
-  patch_mainsail_pause_no_park
-  remove_file_if_present "$PRINTER_CFG_DIR/drukmix_research.cfg"
-  remove_file_if_present "$LEGACY_PLANNER_DST"
-  rm -f "$KLIPPER_VEXT_DST"
-  patch_cfg_if_needed
-  normalize_controller_cfg
-  ensure_required_includes
-  install_service
+  patch_driver_cfg
+  install_klipper_extras
+  install_service_unit
   install_bridge_udev_rule
   reload_udev_rules
-  if wait_for_bridge_alias; then
-    echo "bridge alias ready: /dev/drukos-bridge -> $(readlink -f /dev/drukos-bridge)"
-  else
-    echo "WARNING: /dev/drukos-bridge not present after install"
-  fi
-  install_klipper_extra_if_present
-  restart_service
-  restart_klipper
-  if wait_klipper_ready; then
-    echo "klipper ready after RESTART"
-  else
-    echo "WARNING: klipper did not report ready after RESTART"
-  fi
-  do_status
-}
-
-do_update() {
-  require_repo
-  require_paths
-  git -C "$REPO_DIR" pull --ff-only
-  ensure_venv
-  compile_check
-  sync_macros_from_repo
+  moonraker_write_update_manager
   patch_mainsail_pause_no_park
-  remove_file_if_present "$PRINTER_CFG_DIR/drukmix_research.cfg"
-  remove_file_if_present "$PRINTER_CFG_DIR/drukmix_planner.cfg"
-  rm -f "$KLIPPER_VEXT_DST"
-  patch_cfg_if_needed
-  normalize_controller_cfg
-  ensure_required_includes
-  install_service
-  install_bridge_udev_rule
-  reload_udev_rules
-  install_klipper_extra_if_present
-  restart_service
-  restart_klipper
-  if wait_klipper_ready; then
-    echo "klipper ready after RESTART"
-  else
-    echo "WARNING: klipper did not report ready after RESTART"
-  fi
-  do_status
+  ensure_printer_integration
+  print_ok "moonraker entry" "$MOONRAKER_CFG"
+
+  print_step "Runtime"
+  restart_moonraker_if_possible
+  restart_klipper_if_possible
+  wait_klipper_ready || true
+  enable_runtime_if_ready
+
+  cmd_check
 }
 
-do_purge() {
-  sudo systemctl stop drukmix.service >/dev/null 2>&1 || true
-  sudo systemctl disable drukmix.service >/dev/null 2>&1 || true
+cmd_uninstall() {
+  local artifacts=()
+  [[ -f "$SERVICE_DST" ]] && artifacts+=("service:$SERVICE_DST")
+  [[ -f "$UDEV_RULE_DST" ]] && artifacts+=("udev:$UDEV_RULE_DST")
+  [[ -f "$DRIVER_CFG_DST" ]] && artifacts+=("driver_cfg:$DRIVER_CFG_DST")
+  [[ -f "$CONTROLLER_CFG_DST" ]] && artifacts+=("controller_cfg:$CONTROLLER_CFG_DST")
+  [[ -f "$MACROS_DST" ]] && artifacts+=("macros_cfg:$MACROS_DST")
+  [[ -f "$KLIPPER_EXTRA_DST" ]] && artifacts+=("planner_extra:$KLIPPER_EXTRA_DST")
+  [[ -f "$KLIPPER_CONTROLLER_DST" ]] && artifacts+=("controller_extra:$KLIPPER_CONTROLLER_DST")
+  printer_cfg_has_line "[include drukmix_controller.cfg]" && artifacts+=("printer_include:drukmix_controller.cfg")
+  printer_cfg_has_line "[include drukmix_macros.cfg]" && artifacts+=("printer_include:drukmix_macros.cfg")
+  printer_cfg_has_managed_probe_block && artifacts+=("printer_probe_block:$PRINTER_CFG")
+  has_moonraker_update_manager && artifacts+=("moonraker_entry:$MOONRAKER_CFG")
+  [[ -d "$REPO_DIR/.venv" ]] && artifacts+=("venv:$REPO_DIR/.venv")
+  [[ -f "$PRINTER_LOG_DIR/drukmix_driver.log" ]] && artifacts+=("log:$PRINTER_LOG_DIR/drukmix_driver.log")
+  [[ -d "$REPO_DIR" ]] && artifacts+=("repo:$REPO_DIR")
+
+  print_header "Uninstall Plan"
+  if [[ ${#artifacts[@]} -eq 0 ]]; then
+    print_info "state" "no DrukMix artifacts detected"
+    return 0
+  fi
+  printf '%s\n' "${artifacts[@]}"
+  printf '\nType YES to uninstall DrukMix: '
+  read -r reply
+  if [[ "$reply" != "YES" ]]; then
+    echo "Cancelled."
+    exit 2
+  fi
+
+  print_step "Removing Runtime"
+  if command -v systemctl >/dev/null 2>&1; then
+    sudo systemctl stop drukmix.service >/dev/null 2>&1 || true
+    sudo systemctl disable drukmix.service >/dev/null 2>&1 || true
+  fi
   sudo rm -f "$SERVICE_DST"
-  sudo systemctl daemon-reload
+  sudo systemctl daemon-reload >/dev/null 2>&1 || true
+  sudo rm -f "$UDEV_RULE_DST"
+  reload_udev_rules
 
-  rm -f "$MACROS_DST"
-  rm -f "$PRINTER_CFG_DIR/drukmix_planner.cfg"
-  rm -f "$PRINTER_CFG_DIR/drukmix_research.cfg"
-  rm -f "$KLIPPER_EXTRA_DST"
-  rm -f "$KLIPPER_CONTROLLER_DST"
-  rm -f "$KLIPPER_VEXT_DST"
+  print_step "Removing Files"
+  remove_file_if_exists "$DRIVER_CFG_DST"
+  remove_file_if_exists "$CONTROLLER_CFG_DST"
+  remove_file_if_exists "$MACROS_DST"
+  remove_file_if_exists "$KLIPPER_EXTRA_DST"
+  remove_file_if_exists "$KLIPPER_CONTROLLER_DST"
+  remove_file_if_exists "$PRINTER_LOG_DIR/drukmix_driver.log"
+  rm -rf "$REPO_DIR/.venv"
 
+  print_step "Normalizing Config"
+  remove_printer_integration
+  remove_update_manager_section
+  restart_moonraker_if_possible
+  restart_klipper_if_possible
 
-  remove_include_line "[include drukmix_controller.cfg]"
-  remove_include_line "[include drukmix_macros.cfg]"
-  remove_include_line "[include drukmix_research.cfg]"
-  remove_include_line "[include drukmix_planner.cfg]"
-  remove_managed_planner_probe_section
-
-  echo
-  echo "Purge completed."
-  echo "Kept repo: $REPO_DIR"
-  echo "Kept venv: $REPO_DIR/.venv"
-  echo "Kept driver config: $DRIVER_CFG_DST"
-  echo "Kept controller config: $CONTROLLER_CFG_DST"
-  echo "Removed live macros file: $MACROS_DST"
-  echo "Removed managed planner-probe section from printer.cfg"
-}
-
-do_restart() {
-  restart_service
-  restart_klipper
-  if wait_klipper_ready; then
-    echo "klipper ready after RESTART"
-  else
-    echo "WARNING: klipper did not report ready after RESTART"
-  fi
-  do_status
-}
-
-do_status() {
-  echo
-  echo "== repo =="
-  echo "$REPO_DIR"
-  git -C "$REPO_DIR" rev-parse --short HEAD || true
-
-  echo
-  echo "== user =="
-  echo "$USER_NAME"
-  echo "$USER_HOME"
-
-  echo
-  echo "== paths =="
-  echo "printer cfg dir: $PRINTER_CFG_DIR"
-  echo "printer log dir: $PRINTER_LOG_DIR"
-  echo "driver config: $DRIVER_CFG_DST"
-  echo "controller config: $CONTROLLER_CFG_DST"
-  echo "macros: $MACROS_DST"
-  echo "service: $SERVICE_DST"
-
-  echo "klipper dir: $KLIPPER_DIR"
-  echo "planner klipper extra: $KLIPPER_EXTRA_DST"
-  echo "controller klipper extra: $KLIPPER_CONTROLLER_DST"
-
-  echo
-  echo "== service =="
-  systemctl status drukmix.service --no-pager -l || true
-
-  echo
-  echo "== moonraker server/info =="
-  curl -s localhost:7125/server/info || true
-  echo
-
-  echo
-  echo "== drukmix planner probe =="
-  curl -s -X POST localhost:7125/printer/objects/query \
-    -H 'Content-Type: application/json' \
-    -d '{"objects":{"drukmix_planner_probe":["queue_tail_s","print_window_active","time_to_print_start_s","time_to_print_stop_s","control_velocity_mms"]}}' || true
-  echo
-
-  echo
-  echo "== config preview (driver) =="
-  sed -n '1,220p' "$DRIVER_CFG_DST" || true
-  echo
-  echo "== config preview (controller) =="
-  sed -n '1,220p' "$CONTROLLER_CFG_DST" || true
-}
-
-do_logs() {
-  tail -n 200 -F "$PRINTER_LOG_DIR/drukmix_driver.log"
-}
-
-do_doctor() {
-  echo "== doctor =="
-  echo
-
-  command -v python3 >/dev/null 2>&1 && echo "python3: ok" || echo "python3: missing"
-  command -v curl >/dev/null 2>&1 && echo "curl: ok" || echo "curl: missing"
-  command -v getent >/dev/null 2>&1 && echo "getent: ok" || echo "getent: missing (fallbacks still exist)"
-  command -v udevadm >/dev/null 2>&1 && echo "udevadm: ok" || echo "udevadm: missing"
-  [[ -x "$REPO_DIR/.venv/bin/python" ]] && echo "venv: ok" || echo "venv: missing"
-  [[ -f "$DRIVER_CFG_DST" ]] && echo "driver config: ok ($DRIVER_CFG_DST)" || echo "driver config: missing ($DRIVER_CFG_DST)"
-  [[ -f "$CONTROLLER_CFG_DST" ]] && echo "controller config: ok ($CONTROLLER_CFG_DST)" || echo "controller config: missing ($CONTROLLER_CFG_DST)"
-  [[ -f "$PRINTER_CFG" ]] && echo "printer.cfg: ok ($PRINTER_CFG)" || echo "printer.cfg: missing ($PRINTER_CFG)"
-  [[ -f "$MACROS_DST" ]] && echo "macros: ok ($MACROS_DST)" || echo "macros: missing ($MACROS_DST)"
-  [[ -f "$LEGACY_PLANNER_DST" ]] && echo "legacy planner config: present ($LEGACY_PLANNER_DST)" || echo "legacy planner config: not used"
-  [[ -f "$SERVICE_DST" ]] && echo "service file: ok ($SERVICE_DST)" || echo "service file: missing ($SERVICE_DST)"
-
-  [[ -f "$KLIPPER_EXTRA_DST" ]] && echo "planner klipper extra: ok ($KLIPPER_EXTRA_DST)" || echo "planner klipper extra: missing ($KLIPPER_EXTRA_DST)"
-  [[ -f "$KLIPPER_CONTROLLER_DST" ]] && echo "controller klipper extra: ok ($KLIPPER_CONTROLLER_DST)" || echo "controller klipper extra: missing ($KLIPPER_CONTROLLER_DST)"
-
-
-  echo
-  bridge_status
-
-  echo
-  echo "Moonraker:"
-  curl -s localhost:7125/server/info || true
-  echo
-
-  echo "drukmix planner probe:"
-  curl -s -X POST localhost:7125/printer/objects/query \
-    -H 'Content-Type: application/json' \
-    -d '{"objects":{"drukmix_planner_probe":["queue_tail_s","print_window_active","time_to_print_start_s","time_to_print_stop_s","control_velocity_mms"]}}' || true
-  echo
-}
-
-# Lab helpers removed for production installer.
-
-do_cfg_reset() {
-  require_repo
-  require_paths
-
-  if [[ ! -f "$DRIVER_CFG_DST" ]]; then
-    echo "Driver config not found: $DRIVER_CFG_DST"
-    echo "Run install first."
-    exit 2
-  fi
-  if [[ ! -f "$CONTROLLER_CFG_DST" ]]; then
-    echo "Controller config not found: $CONTROLLER_CFG_DST"
-    echo "Run install first."
-    exit 2
+  print_step "Removing Repo"
+  if [[ -d "$REPO_DIR" ]]; then
+    ( sleep 1; rm -rf "$REPO_DIR" ) >/dev/null 2>&1 &
+    print_ok "repo" "scheduled removal: $REPO_DIR"
   fi
 
-  local ts driver_backup controller_backup macros_backup
-  ts="$(date +%Y%m%d_%H%M%S)"
-
-  driver_backup="$DRIVER_CFG_DST.bak.$ts"
-  cp "$DRIVER_CFG_DST" "$driver_backup"
-
-  controller_backup="$CONTROLLER_CFG_DST.bak.$ts"
-  cp "$CONTROLLER_CFG_DST" "$controller_backup"
-
-  if [[ -f "$MACROS_DST" ]]; then
-    macros_backup="$MACROS_DST.bak.$ts"
-    cp "$MACROS_DST" "$macros_backup"
-  fi
-
-  cp "$DRIVER_CFG_TEMPLATE" "$DRIVER_CFG_DST"
-  cp "$CONTROLLER_CFG_TEMPLATE" "$CONTROLLER_CFG_DST"
-  cp "$MACROS_TEMPLATE" "$MACROS_DST"
-  patch_cfg_if_needed
-  patch_mainsail_pause_no_park
-
-  echo "Reset driver config from template: $DRIVER_CFG_TEMPLATE -> $DRIVER_CFG_DST"
-  echo "Reset controller config from template: $CONTROLLER_CFG_TEMPLATE -> $CONTROLLER_CFG_DST"
-  echo "Reset macros from template: $MACROS_TEMPLATE -> $MACROS_DST"
-  echo "Driver config backup saved: $driver_backup"
-  echo "Controller config backup saved: $controller_backup"
-  if [[ -n "${macros_backup:-}" ]]; then
-    echo "Macros backup saved: $macros_backup"
-  else
-    echo "Macros backup: none (file did not exist before reset)"
-  fi
+  print_header "Summary"
+  print_ok "state" "DrukMix uninstall completed"
 }
 
-usage() {
-  cat <<USAGE
-Usage: $0 <install|update|cfg-reset|purge|restart|status|logs|doctor>
-USAGE
-}
-
-cmd="${1:-}"
+cmd="${1:-help}"
 case "$cmd" in
-  install) do_install ;;
-  update) do_update ;;
-  cfg-reset) do_cfg_reset ;;
-  purge) do_purge ;;
-  restart) do_restart ;;
-  status) do_status ;;
-  logs) do_logs ;;
-  doctor) do_doctor ;;
-  *) usage; exit 2 ;;
+  help|-h|--help)
+    cmd_help
+    ;;
+  check)
+    cmd_check
+    ;;
+  install)
+    cmd_install "${2:-}"
+    ;;
+  uninstall)
+    cmd_uninstall
+    ;;
+  flash)
+    echo "Not implemented yet: flash ${2:-}"
+    exit 2
+    ;;
+  *)
+    cmd_help
+    exit 2
+    ;;
 esac

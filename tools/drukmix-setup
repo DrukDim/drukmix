@@ -2,4 +2,21 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec "$SCRIPT_DIR/drukmix" install "$@"
+TARGET="/usr/local/bin/drukmix"
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  cat <<EOF
+Usage: $0
+
+Install a global launcher:
+  /usr/local/bin/drukmix -> $SCRIPT_DIR/drukmix
+
+After that you can run:
+  drukmix help
+  drukmix check
+EOF
+  exit 0
+fi
+
+sudo ln -snf "$SCRIPT_DIR/drukmix" "$TARGET"
+echo "Installed launcher: $TARGET -> $SCRIPT_DIR/drukmix"
