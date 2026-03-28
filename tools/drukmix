@@ -531,6 +531,13 @@ remove_path_any_owner() {
   sudo rm -rf "$path"
 }
 
+schedule_path_removal() {
+  local path="$1"
+  local quoted
+  quoted="$(printf '%q' "$path")"
+  nohup bash -lc "sleep 1; rm -rf $quoted >/dev/null 2>&1 || sudo rm -rf $quoted >/dev/null 2>&1" >/dev/null 2>&1 &
+}
+
 remove_update_manager_section() {
   MOONRAKER_CFG="$MOONRAKER_CFG" python3 - <<'PY'
 from pathlib import Path
@@ -832,7 +839,7 @@ cmd_uninstall() {
 
   print_step "Removing Repo"
   if [[ -d "$REPO_DIR" ]]; then
-    ( sleep 1; remove_path_any_owner "$REPO_DIR" ) >/dev/null 2>&1 &
+    schedule_path_removal "$REPO_DIR"
     print_ok "repo" "scheduled removal: $REPO_DIR"
   fi
 
