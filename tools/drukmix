@@ -150,6 +150,17 @@ require_printer_stack_paths() {
   done
 }
 
+ensure_sudo_session() {
+  if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+    return 0
+  fi
+  if ! command -v sudo >/dev/null 2>&1; then
+    echo "sudo is required for this command"
+    exit 2
+  fi
+  sudo -v
+}
+
 ensure_venv() {
   require_python
   if [[ ! -x "$REPO_DIR/.venv/bin/python" ]]; then
@@ -719,6 +730,7 @@ cmd_install() {
   require_repo_layout
   require_printer_stack_paths
   require_python
+  ensure_sudo_session
   if [[ "$profile" != "main" ]]; then
     print_info "profile" "$profile uses core install only for now"
   fi
@@ -778,6 +790,7 @@ cmd_uninstall() {
     echo "Cancelled."
     exit 2
   fi
+  ensure_sudo_session
 
   print_step "Removing Runtime"
   if command -v systemctl >/dev/null 2>&1; then
