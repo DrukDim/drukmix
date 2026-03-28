@@ -90,15 +90,18 @@ DrukMix currently assumes a deployment environment built around:
 - a printer config directory under the active user home
 - udev-based stable serial aliasing for the bridge device
 
-Current normal install flow expects a host environment where the helper can:
+Current normal host-side tooling expects an environment where the helper can:
 - create a Python virtual environment;
 - install Python dependencies;
 - install a global `drukmix` command launcher;
 - install / reload a systemd unit;
 - install or keep live config files under `~/printer_data/config`;
-- install bridge udev rule, reload udev rules, and wait for the bridge alias to appear.
+- install bridge udev rule and reload udev rules.
 
-After a successful install or update, the helper installs a global launcher at `/usr/local/bin/drukmix`
+The current helper works from the local repository checkout.
+Repository fetch/update is expected to come from Moonraker `update_manager`, not from `tools/drukmix`.
+
+`./tools/drukmix-setup` installs a global launcher at `/usr/local/bin/drukmix`
 that forwards to the repository checkout's `tools/drukmix` script.
 
 ## Host prerequisites
@@ -154,7 +157,7 @@ Current production planner contract is intentionally compact:
 Current config ownership model:
 - driver runtime values are owned by `[drukmix_driver]` in `drukmix_driver.cfg`;
 - controller lookahead/policy values (`pump_start_lookahead_s`, `pump_run_lookahead_s`, `pump_stop_lookahead_s`, prestart/prestop behavior, velocity mapping) are owned by `[drukmix_controller]` in `drukmix_controller.cfg`;
-- Klipper planner-probe section is managed directly inside `printer.cfg` by the install/update helper;
+- Klipper planner-probe section is managed directly inside `printer.cfg` by the install helper;
 - do not create a separate `drukmix_planner.cfg` unless there is an explicit verified request to reintroduce that file.
 
 Research-style multi-horizon planner fields such as `planned_v_now` ... `planned_v_15000ms` are not intended to remain in the production control path.
@@ -175,7 +178,7 @@ Relevant files:
 
 Canonical workflow:
 
-`repo -> deploy -> restart -> verify`
+`repo -> deploy -> hardware-check -> enable -> verify`
 
 Rules:
 - make changes in repo first;
@@ -190,16 +193,17 @@ Quickstart (Moonraker/Mainsail):
    type: git_repo
    path: /home/drukos/drukmix
    origin: <your-remote-url>
-   primary_branch: feature/hybrid-klipper-controller
-   post_update: /home/drukos/drukmix/tools/drukmix install
+   primary_branch: main
    ```
    Adjust paths/user/branch as needed.
-2. After Update in Mainsail/Moonraker:
-   - Klipper: `systemctl restart klipper` (reloads the controller extra)
-   - Driver: start/restart your service or run `DRUKMIX_CONFIG=~/printer_data/config/drukmix_driver.cfg python3 /home/drukos/drukmix/drukmix_driver.py`
-3. If you want auto-start for the driver, run `tools/drukmix install` once with the required privileges. The service is optional and can be skipped on systems without systemd.
+2. On the host, install the command launcher once:
+   - `./tools/drukmix-setup`
+3. Use the local checkout helper:
+   - `drukmix check`
+   - `drukmix install <profile>`
+4. If bridge or pump hardware is not ready yet, treat that as a hardware provisioning step, not as a repository/update failure.
 
-This keeps updates reproducible: pull via Update Manager, run the setup helper, restart services, verify.
+This keeps updates reproducible: Moonraker updates the checkout, `drukmix` applies the local checkout to the host, and `check` reports real readiness state.
 
 ## Status
 
@@ -208,7 +212,7 @@ Current verified state:
 - deployed backend is currently `pumpvfd`;
 - the command path is working;
 - example-based live config install is working;
-- install now waits for `/dev/drukos-bridge` before service restart;
+- `drukmix check` and `drukmix uninstall` have been validated on a live machine bring-up/teardown cycle;
 - telemetry and status semantics are still under active cleanup and clarification.
 
 ## Current limitations
@@ -219,7 +223,8 @@ Current known limitations include:
 - the currently deployed live path is `pumpvfd`, even though the architecture is intended to remain multi-backend;
 - telemetry semantics are still being cleaned up to better separate requested, delivered, backend-reported, and real physical state;
 - bridge USB identity is still generic at the base USB-device level and currently depends on udev aliasing for stable attachment;
-- flashing and first-install provisioning of blank bridge/pump ESP-based devices is not yet a canonicalized installer workflow;
+- flashing and first-install provisioning of blank bridge/pump devices is not yet a finished canonical CLI workflow;
+- `install` / `flash bridge` / `flash vfd` / `flash tpl` are still being split into clearer lifecycle stages;
 - planned-motion feedforward is still experimental research and not yet a canonicalized host-control path.
 - the canonical variability model is now defined, but it still needs validation against additional clean installs and additional machine bring-up scenarios before a final profile/folder layout is frozen.
 

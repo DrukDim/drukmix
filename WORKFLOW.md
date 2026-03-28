@@ -8,7 +8,7 @@ Until explicitly replaced by a newer canonical rule, this workflow is mandatory.
 
 Canonical workflow:
 
-`repo -> deploy -> restart -> verify`
+`repo -> deploy -> hardware-check -> enable -> verify`
 
 This means:
 
@@ -52,27 +52,35 @@ Current canonical deployment layout:
 These paths and roles must not be changed casually.
 If changed, the new layout must be reflected in canonical docs.
 
-## Normal install/update model
+## Normal local-deploy model
 
 Current normal repository-driven deployment model is:
 
 1. clone or update repo checkout;
-2. run `./tools/drukmix install` or `./tools/drukmix update`;
-3. let the helper:
+2. run `./tools/drukmix-setup` once if you want a global `drukmix` command;
+3. run `drukmix check` to see current host/install/hardware/runtime state;
+4. run `drukmix install <profile>`;
+5. let the helper:
    - create/update `.venv`;
    - install Python dependencies;
    - install the systemd unit;
-   - install default live driver/controller config and macros only if missing;
+   - install default live driver/controller config and macros if missing;
    - patch live config paths if needed;
-   - migrate legacy DrukMix macro files that still advertise unsupported remote methods;
    - ensure `[include drukmix_controller.cfg]` exists in `printer.cfg`;
    - ensure `[include drukmix_macros.cfg]` exists in `printer.cfg`;
    - install bridge udev rule;
    - reload udev rules;
-   - wait for `/dev/drukos-bridge`;
-   - install the experimental Klipper extra if the expected Klipper tree exists;
-   - restart the service;
-4. verify runtime behavior.
+   - install the Klipper extras if the expected Klipper tree exists;
+   - manage the planner probe block in `printer.cfg`;
+   - start runtime only if hardware readiness is sufficient;
+6. verify runtime behavior with `drukmix check`.
+
+Important rules:
+
+- `tools/drukmix` works from the local checkout only;
+- repository fetch/update belongs to Moonraker `update_manager`, not to the helper;
+- missing bridge/pump hardware is a readiness state, not a repo-deploy failure;
+- hardware flashing/provisioning is a separate lifecycle stage from host install.
 
 ## Temporary research-branch workflow
 
@@ -129,7 +137,7 @@ Verification must be tied to real machine semantics.
 Examples of acceptable verification:
 
 - service starts correctly;
-- `./tools/drukmix doctor` shows expected files and expected bridge alias state;
+- `drukmix check` shows expected files and expected bridge alias/runtime state;
 - `/dev/drukos-bridge` exists and resolves to the intended serial device;
 - expected command path works end-to-end;
 - observed runtime behavior matches intended control semantics;
@@ -166,8 +174,8 @@ Current normal runtime depends on a stable Linux bridge alias:
 
 Rules:
 
-- service restart should happen only after the expected bridge alias is present or an explicit warning is emitted;
-- bridge attachment must be verified during install/doctor flows;
+- service enable/start should happen only after the expected bridge alias is present or runtime is explicitly left disabled;
+- bridge attachment must be verified during install/check flows;
 - generic host-visible USB naming must not be treated as a durable canonical identity model;
 - future first-install / blank-device provisioning must be documented explicitly when it becomes canonical.
 
