@@ -520,6 +520,17 @@ remove_file_if_exists() {
   fi
 }
 
+remove_path_any_owner() {
+  local path="$1"
+  if [[ ! -e "$path" && ! -L "$path" ]]; then
+    return 0
+  fi
+  if rm -rf "$path" 2>/dev/null; then
+    return 0
+  fi
+  sudo rm -rf "$path"
+}
+
 remove_update_manager_section() {
   MOONRAKER_CFG="$MOONRAKER_CFG" python3 - <<'PY'
 from pathlib import Path
@@ -809,7 +820,6 @@ cmd_uninstall() {
   remove_file_if_exists "$KLIPPER_EXTRA_DST"
   remove_file_if_exists "$KLIPPER_CONTROLLER_DST"
   remove_file_if_exists "$PRINTER_LOG_DIR/drukmix_driver.log"
-  rm -rf "$REPO_DIR/.venv"
 
   print_step "Normalizing Config"
   remove_printer_integration
@@ -817,9 +827,12 @@ cmd_uninstall() {
   restart_moonraker_if_possible
   restart_klipper_if_possible
 
+  print_step "Removing Local Checkout"
+  remove_path_any_owner "$REPO_DIR/.venv"
+
   print_step "Removing Repo"
   if [[ -d "$REPO_DIR" ]]; then
-    ( sleep 1; rm -rf "$REPO_DIR" ) >/dev/null 2>&1 &
+    ( sleep 1; remove_path_any_owner "$REPO_DIR" ) >/dev/null 2>&1 &
     print_ok "repo" "scheduled removal: $REPO_DIR"
   fi
 
