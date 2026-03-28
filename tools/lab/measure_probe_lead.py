@@ -13,7 +13,6 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Optional
 
-
 PLANNER_FIELDS = [
     "queue_tail_s",
     "print_window_active",
@@ -89,10 +88,10 @@ def query_probe(moonraker_http: str, timeout_s: float = 1.0) -> ProbeSample:
 def read_lookahead_from_cfg(cfg_path: str) -> float:
     cp = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
     cp.read(cfg_path)
-    if cp.has_section("drukmix"):
-        v = cp.getfloat("drukmix", "pump_start_lookahead_s", fallback=4.0)
+    if cp.has_section("drukmix_controller"):
+        v = cp.getfloat("drukmix_controller", "pump_start_lookahead_s", fallback=3.0)
     else:
-        v = 4.0
+        v = 3.0
     return max(0.0, min(30.0, float(v)))
 
 
@@ -124,7 +123,11 @@ def parse_flow_events(bridge_log_path: str, start_mono: float) -> list[FlowEvent
             except Exception:
                 continue
 
-            out.append(FlowEvent(ts_mono=ts, target_milli_lpm=target, rev=bool(row.get("rev", False))))
+            out.append(
+                FlowEvent(
+                    ts_mono=ts, target_milli_lpm=target, rev=bool(row.get("rev", False))
+                )
+            )
 
     return out
 
@@ -136,9 +139,14 @@ def nearest_sample(samples: list[ProbeSample], ts_mono: float) -> Optional[Probe
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Measure planner probe lead against fake bridge flow commands")
+    ap = argparse.ArgumentParser(
+        description="Measure planner probe lead against fake bridge flow commands"
+    )
     ap.add_argument("--moonraker-http", default="http://127.0.0.1:7125")
-    ap.add_argument("--cfg", default=os.path.expanduser("~/printer_data/config/drukmix.cfg"))
+    ap.add_argument(
+        "--cfg",
+        default=os.path.expanduser("~/printer_data/config/drukmix_controller.cfg"),
+    )
     ap.add_argument("--bridge-log", default="/tmp/drukmix_fake_bridge.jsonl")
     ap.add_argument("--duration-s", type=float, default=45.0)
     ap.add_argument("--poll-s", type=float, default=0.10)
@@ -228,8 +236,12 @@ def main() -> int:
             "target_milli_lpm": first_positive.target_milli_lpm,
             "rev": first_positive.rev,
             "nearest_probe_eventtime": None if near is None else near.eventtime,
-            "nearest_probe_time_to_print_start_s": None if near is None else near.time_to_print_start_s,
-            "nearest_probe_time_to_print_stop_s": None if near is None else near.time_to_print_stop_s,
+            "nearest_probe_time_to_print_start_s": None
+            if near is None
+            else near.time_to_print_start_s,
+            "nearest_probe_time_to_print_stop_s": None
+            if near is None
+            else near.time_to_print_stop_s,
         }
 
         if lead_obs is not None:
@@ -240,8 +252,12 @@ def main() -> int:
         with open(args.out_json, "w", encoding="utf-8") as f:
             json.dump(measured, f, ensure_ascii=True, indent=2)
 
-    print(f"samples={measured['capture']['samples']} query_errors={measured['capture']['query_errors']}")
-    print(f"flow_events_total={measured['capture']['flow_events_total']} positive={measured['capture']['flow_events_positive']}")
+    print(
+        f"samples={measured['capture']['samples']} query_errors={measured['capture']['query_errors']}"
+    )
+    print(
+        f"flow_events_total={measured['capture']['flow_events_total']} positive={measured['capture']['flow_events_positive']}"
+    )
 
     if measured["first_prestart"] is None:
         print("first_prestart=none")
