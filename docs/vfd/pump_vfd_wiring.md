@@ -16,6 +16,7 @@ The current `pump_vfd` firmware uses these MCU pins for VFD Modbus communication
 - `UART_TX_PIN = 17`
 - `UART_RTS_PIN = 4`
 - `UART_BAUD = 9600`
+- UART format `8N1`
 - `MODBUS_SLAVE_ID = 1`
 
 Source:

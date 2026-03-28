@@ -48,12 +48,16 @@ Read this when:
 
 - [pump_vfd_wiring.md](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/pump_vfd_wiring.md)
 - [m980_setup_baseline.md](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/m980_setup_baseline.md)
+- [m980_commissioning_checklist.md](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/m980_commissioning_checklist.md)
+- [m980_local_remote_modes.md](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/m980_local_remote_modes.md)
 
 Read these when:
 
 - wiring ESP to RS485 / VFD,
 - checking MCU pin assignments,
-- confirming the minimum M980-side configuration needed for communication control.
+- confirming the minimum M980-side configuration needed for communication control,
+- commissioning a reset M980 from motor nameplate entry through autotune,
+- wiring or reasoning about local-manual vs Modbus mode switching.
 
 ### 5. Vendor references
 
@@ -78,7 +82,8 @@ The repository still needs clearer canonical documentation for:
 - exact RS485 transceiver wiring used in field hardware,
 - exact A/B/GND wiring to the VFD,
 - whether current field hardware requires explicit transceiver decoupling or special bias/termination,
-- exact M980 parameter checklist required from factory defaults for the current deployed path.
+- exact M980 parameter checklist required from factory defaults for the current deployed path,
+- exact field-approved DI terminal and wiring for local/remote switching.
 
 ## Related code
 

@@ -24,6 +24,7 @@ Current firmware assumptions:
 
 - Modbus RTU over RS485
 - baud rate: `9600`
+- UART format: `8N1`
 - slave address: `1`
 
 Source:
@@ -64,12 +65,17 @@ Long-form vendor or field-reference material:
 - [m980_mdriver_vfd_manual.pdf](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/m980_mdriver_vfd_manual.pdf)
 - [m900_mdriver_vfd_manual.pdf](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/m900_mdriver_vfd_manual.pdf)
 
+Short repository checklists:
+
+- [m980_commissioning_checklist.md](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/m980_commissioning_checklist.md)
+- [m980_local_remote_modes.md](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/m980_local_remote_modes.md)
+
 ## Current gap
 
 The repository still does not contain a short canonical checklist of:
 
-- exactly which M980 parameters must be changed from factory defaults
-- exactly which terminal/control-source settings are mandatory for the current field setup
 - exactly which stop/ramp parameters are recommended for concrete printing
+- exact field-approved AI1 scaling / potentiometer wiring details
+- exact field-approved local/remote switch wiring
 
 Those values should be extracted from the references and confirmed on real hardware before being presented here as project truth.
