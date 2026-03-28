@@ -87,6 +87,25 @@ Rules for such branches:
 - experimental config/includes must also be repo-driven and reproducible;
 - experimental deployment must not silently redefine the canonical production model.
 
+## New printer bring-up workflow
+
+A new printer must be brought up against the canonical core baseline first.
+
+Required order:
+
+1. Install the canonical repository-driven baseline.
+2. Verify what works without local overrides.
+3. Record only confirmed machine-specific differences.
+4. Add environment-specific, machine-specific, backend-specific, or compatibility-specific overrides explicitly.
+5. Do not modify core for a problem that is local to one machine.
+6. If a local issue reveals a real core defect, classify it explicitly as a core defect before changing core.
+
+Rules:
+
+- do not create a new repository structure for one printer as an ad hoc shortcut;
+- do not mix machine-specific, backend-specific, and environment-specific changes into one undifferentiated “printer variant”;
+- keep new-printer bring-up aligned with the canonical variability model in `VARIABILITY_MODEL.md`.
+
 ## Change procedure
 
 For normal changes:
@@ -168,6 +187,7 @@ When workflow changes:
 
 - update `README.md` if the workflow change becomes canonical;
 - update `WORKFLOW.md` with the operational procedure;
+- update `VARIABILITY_MODEL.md` if the change alters allowed variation classes or non-mixing rules;
 - keep `AGENTS.md` aligned if the agent-facing rules changed.
 
 ## Default stance

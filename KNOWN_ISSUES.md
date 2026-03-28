@@ -301,7 +301,7 @@ Related areas:
 These items are intentionally preserved from the prior canonical checklist.
 Some are architectural tasks rather than single-point bugs, but they remain open and must not be lost.
 
-### 10. Agent still depends on non-canonical Moonraker lifecycle/motion fields during planner migration
+### 10. Runtime path still depends on non-canonical Moonraker lifecycle/motion fields during planner migration
 
 Status: active migration item
 
@@ -380,3 +380,23 @@ Translation layers should be reduced only where meaning is preserved and ownersh
 Status: active checklist item
 
 The project needs measured evidence from the actual machine before planner-derived feedforward becomes canonical host behavior.
+
+### 21. Validate the canonical variability model against at least one additional clean machine bring-up
+
+Status: active architecture/workflow item
+
+The project now defines canonical variation classes for:
+
+- core;
+- environment-specific;
+- machine-specific;
+- backend-specific;
+- compatibility-specific.
+
+That model still needs validation against at least one additional clean installation / new-printer bring-up before a final profile or folder-layout strategy is treated as settled project truth.
+
+Implication:
+
+- the variability model is now documented and canonical as a rule set;
+- the final concrete profile/folder layout should remain conservative until validated by real second-machine experience;
+- new bring-up work must report which differences were truly machine-specific, backend-specific, environment-specific, or compatibility-specific.

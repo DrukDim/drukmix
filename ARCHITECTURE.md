@@ -75,6 +75,89 @@ This is the closest layer to machine truth, but even device-reported values must
 
 ## Canonical model rules
 
+## Variability model
+
+`drukmix` must remain one canonical core project.
+
+The architecture must support explicit variation without allowing every new printer, backend, or host environment to redefine the project structure.
+
+Canonical variability classes are:
+
+1. core
+2. environment-specific
+3. machine-specific
+4. backend-specific
+5. compatibility-specific
+
+### Core
+
+Core includes the shared runtime, planner/controller path, abstract pump model, transport model, canonical deploy workflow, and canonical truth/semantics rules.
+
+Core must not absorb accidental machine-local, backend-local, or environment-local assumptions.
+
+### Environment-specific
+
+Environment-specific variation includes host layout, paths, users, service-manager details, `udev`, and serial attachment behavior.
+
+Rules:
+
+- these differences belong to deployment/install logic first;
+- they must not redefine machine semantics;
+- they must not require architecture forks of core control logic.
+
+### Machine-specific
+
+Machine-specific variation includes printer integration details such as:
+
+- machine naming;
+- `printer.cfg` include structure;
+- machine-local macro overlays;
+- machine-local defaults where those defaults are truly local.
+
+Rules:
+
+- a machine-specific layer must not duplicate core `drukmix` logic;
+- it may include core components and add explicit local overrides;
+- it must not silently redefine canonical core behavior.
+
+### Backend-specific
+
+Backend-specific variation includes backend families, series/model profiles, capability differences, and backend-local fault/manual/drive semantics.
+
+Rules:
+
+- backend-local meaning must remain backend-local unless intentionally promoted;
+- a backend-specific worldview must not become a project-wide truth by accident.
+
+### Compatibility-specific
+
+Compatibility-specific variation includes behavior differences caused by upstream software versions or upstream defaults.
+
+Rules:
+
+- compatibility handling must be explicit;
+- compatibility workarounds must not be normalized into machine truth;
+- version-sensitive behavior must remain documented as compatibility handling rather than being presented as timeless project semantics.
+
+### Non-mixing rule
+
+The variability classes must not be mixed.
+
+Do not let:
+
+- environment-specific deployment details become machine architecture;
+- backend-local semantics become printer profile semantics;
+- compatibility workarounds become canonical machine behavior;
+- printer-local overrides silently become shared core rules.
+
+### New printer rule
+
+A new printer must be treated as:
+
+`canonical core + environment adaptation + machine integration + backend selection + compatibility notes`
+
+It must not be treated as a reason to create a new `drukmix` architecture.
+
 ### Abstract pump model first
 
 The abstract pump model is canonical.

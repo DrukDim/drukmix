@@ -31,6 +31,31 @@ Current backend families:
 
 The current live/deployed path is `pumpvfd`, but upper layers should not become permanently backend-locked.
 
+## Variability model
+
+`drukmix` is intended to remain one canonical core project.
+
+Differences between installations must be handled as explicit, classified variation around that core, not by creating a new repository structure or a new unofficial `drukmix` variant for every printer.
+
+Current canonical variability classes are:
+
+- `core` — shared runtime, planner/controller path, abstract pump model, transport model, canonical docs;
+- `environment-specific` — host layout, user/home/paths, service-manager details, `udev`, serial attachment;
+- `machine-specific` — printer integration, machine naming, `printer.cfg` includes, local macro overrides, machine-local defaults;
+- `backend-specific` — `pumpvfd`, `pumptpl`, future backend families, backend-local capability and fault semantics;
+- `compatibility-specific` — Moonraker, Klipper, Mainsail, and upstream stack behavior/version constraints.
+
+Rules:
+
+- a new printer must not create a new `drukmix` architecture;
+- environment-specific details must stay in deployment/install logic rather than leaking into core semantics;
+- machine-specific overrides must not silently redefine core behavior;
+- backend-specific meaning must stay backend-local unless intentionally promoted into canonical architecture;
+- compatibility workarounds must be tracked explicitly rather than normalized into project truth.
+
+See:
+- `VARIABILITY_MODEL.md`
+
 ## Current deployment model
 
 DrukMix is currently deployed from a normal repository checkout and runs directly from that checkout.
@@ -196,6 +221,7 @@ Current known limitations include:
 - bridge USB identity is still generic at the base USB-device level and currently depends on udev aliasing for stable attachment;
 - flashing and first-install provisioning of blank bridge/pump ESP-based devices is not yet a canonicalized installer workflow;
 - planned-motion feedforward is still experimental research and not yet a canonicalized host-control path.
+- the canonical variability model is now defined, but it still needs validation against additional clean installs and additional machine bring-up scenarios before a final profile/folder layout is frozen.
 
 ## Project documents
 
@@ -203,6 +229,7 @@ Current known limitations include:
 - `AGENTS.md` — short operational rules for AI-assisted work
 - `WORKFLOW.md` — canonical change / deploy / verify procedure
 - `ARCHITECTURE.md` — canonical architectural layers and semantics
+- `VARIABILITY_MODEL.md` — canonical variation classes and non-mixing rules
 - `KNOWN_ISSUES.md` — confirmed defects, active constraints, and open checklist items
 - `docs/research/planner_feedforward.md` — temporary research plan for planner-aware feedforward
 
