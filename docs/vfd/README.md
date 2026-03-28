@@ -57,8 +57,8 @@ Read these when:
 
 ### 5. Vendor references
 
-- [manual_vfd_mdriver_m980.pdf](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/manual_vfd_mdriver_m980.pdf)
-- [manual_vfd_mdriver_m900.pdf](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/manual_vfd_mdriver_m900.pdf)
+- [m980_mdriver_vfd_manual.pdf](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/m980_mdriver_vfd_manual.pdf)
+- [m900_mdriver_vfd_manual.pdf](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/m900_mdriver_vfd_manual.pdf)
 
 These PDFs are reference material, not canonical project truth by themselves.
 Project rules should be extracted from them into short repository docs only after they are verified against real hardware behavior.

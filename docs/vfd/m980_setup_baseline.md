@@ -61,8 +61,8 @@ Source:
 
 Long-form vendor or field-reference material:
 
-- [manual_vfd_mdriver_m980.pdf](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/manual_vfd_mdriver_m980.pdf)
-- [manual_vfd_mdriver_m900.pdf](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/manual_vfd_mdriver_m900.pdf)
+- [m980_mdriver_vfd_manual.pdf](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/m980_mdriver_vfd_manual.pdf)
+- [m900_mdriver_vfd_manual.pdf](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/m900_mdriver_vfd_manual.pdf)
 
 ## Current gap
 
