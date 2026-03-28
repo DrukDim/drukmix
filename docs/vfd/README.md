@@ -9,7 +9,7 @@
 - міняєш логіку `pump_vfd` драйвера
 - міняєш reset fault / stop / run семантику
 - міняєш інтерпретацію status register'ів
-- міняєш host/bridge/agent логіку, яка залежить від значення `fault`, `running`, `actual freq`
+- міняєш host/bridge/driver логіку, яка залежить від значення `fault`, `running`, `actual freq`
 
 ### 2. `m900_m980_differences.md`
 Читати коли:
@@ -25,7 +25,7 @@
 
 ### 4. `modbus_driver_contract.md`
 Читати коли:
-- міняєш архітектуру між `agent`, `bridge`, `pump_vfd`
+- міняєш архітектуру між `driver`, `bridge`, `pump_vfd`
 - міняєш state model
 - додаєш нові поля статусу або профілі VFD
 
@@ -46,5 +46,5 @@
 
 - `firmware/pump_vfd/`
 - `firmware/bridge/`
-- `agent/`
+- `drukmix_driver.py`
 - `README.md`

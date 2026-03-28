@@ -463,7 +463,7 @@ def main() -> int:
         (vel_zeroish_pump_on / vel_zeroish_total) if vel_zeroish_total else None
     )
 
-    # Additional evidence from agent transitions log lines.
+    # Additional evidence from driver transition log lines.
     semantic_log_lines = [
         ln
         for ln in drukmix_new.splitlines()

@@ -54,12 +54,16 @@ class PumpVfdBackend(PumpBackend):
         if pct <= 0.0:
             if not self._stopped:
                 if self.debug_log:
-                    logging.info("drukmix backend apply: action=vfd_stop reason=zero_pct")
+                    logging.info(
+                        "drukmix backend apply: action=vfd_stop reason=zero_pct"
+                    )
                 self.transport.vfd_stop()
                 self._stopped = True
             else:
                 if self.debug_log:
-                    logging.info("drukmix backend apply: action=skip_stop reason=already_stopped")
+                    logging.info(
+                        "drukmix backend apply: action=skip_stop reason=already_stopped"
+                    )
             return
 
         if self.debug_log:
@@ -104,7 +108,11 @@ class PumpVfdBackend(PumpBackend):
                 fault_name="Bridge status unavailable",
                 fault_text="Bridge status unavailable",
                 possible_causes=["USB/bridge status is not being received"],
-                solutions=["Check bridge power", "Check USB link", "Check agent serial port"],
+                solutions=[
+                    "Check bridge power",
+                    "Check USB link",
+                    "Check driver serial port",
+                ],
                 can_auto_reset=False,
                 auto_reset_attempted=self._auto_reset_err16_done,
                 pause_print=True,
@@ -153,7 +161,11 @@ class PumpVfdBackend(PumpBackend):
             fault_code=fault_code,
             fault_display=(info.display if info else ""),
             fault_name=(info.name if info else ""),
-            fault_text=(f"{info.display} {info.name}" if info else (f"Err{fault_code:02d}" if fault_code > 0 else "")),
+            fault_text=(
+                f"{info.display} {info.name}"
+                if info
+                else (f"Err{fault_code:02d}" if fault_code > 0 else "")
+            ),
             possible_causes=(list(info.possible_causes) if info else []),
             solutions=(list(info.solutions) if info else []),
             can_auto_reset=bool(info.auto_reset_once) if info else False,
@@ -170,7 +182,9 @@ class PumpVfdBackend(PumpBackend):
             applied_code=int(raw.get("applied_code", -1)),
         )
 
-    def maybe_auto_reset_startup_fault(self, printing: bool, running: bool | None) -> bool:
+    def maybe_auto_reset_startup_fault(
+        self, printing: bool, running: bool | None
+    ) -> bool:
         st = self.poll_status()
         if st.fault_code != 16:
             return False

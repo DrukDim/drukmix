@@ -208,7 +208,7 @@ Status: active migration constraint
 
 Planner-derived extruder demand from `drukmix_planner_probe` has been validated as the intended printer-side motion authority for automatic pump control.
 
-However, the host agent still contains transition-era dependencies and semantics that must be removed or formalized.
+However, the host runtime path still contains transition-era dependencies and semantics that must be removed or formalized.
 
 Implication:
 
@@ -252,7 +252,7 @@ The runtime production path still contains `PLANNER_HORIZONS`, `planned_v_*`, an
 Implication:
 - research instrumentation is still leaking into production control semantics;
 - host orchestration still depends on a non-canonical planner payload shape;
-- production contract cleanup must remove multi-horizon payload from the normal agent/probe runtime path.
+- production contract cleanup must remove multi-horizon payload from the normal production runtime path.
 
 Related areas:
 - `klipper_extra/drukmix_planner_probe.py`

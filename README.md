@@ -140,7 +140,7 @@ Current deployment-stage expectation:
 - backend mode `UNKNOWN` also blocks automatic orchestration;
 - physical MANUAL/AUTO switching is planned future integration, not something to be approximated by weakening `UNKNOWN` handling.
 
-This direction has been validated sufficiently to justify architectural migration, but the final agent cleanup and the exact cold-start / run / stop lookahead policy are still being formalized.
+This direction has been validated sufficiently to justify architectural migration, but the remaining transition-era cleanup and the exact cold-start / run / stop lookahead policy are still being formalized.
 
 Relevant files:
 - `klipper_extra/drukmix_planner_probe.py`

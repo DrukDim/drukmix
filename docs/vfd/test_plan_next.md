@@ -38,6 +38,6 @@ For several targets:
 
 ## E. Integration next
 After A-D:
-- agent normalization
+- driver/backend normalization
 - Klipper macros
 - pause/fault policy

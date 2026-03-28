@@ -2,7 +2,7 @@
 
 ## Навіщо цей файл
 
-Це швидка шпаргалка для fault code, коли код прийшов у лог Klipper / agent / bridge / pump node
+Це швидка шпаргалка для fault code, коли код прийшов у лог Klipper / driver / bridge / pump node
 і потрібно швидко зрозуміти клас проблеми та policy.
 
 ## Baseline faults for DrukMix

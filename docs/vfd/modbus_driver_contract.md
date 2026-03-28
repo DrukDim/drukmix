@@ -9,8 +9,8 @@
 Цей файл описує контракт між:
 - `firmware/pump_vfd`
 - `firmware/bridge`
-- `agent`
-- майбутніми Klipper macro / service integration
+- `drukmix_driver.py`
+- Klipper / Moonraker / service integration
 
 ## Shared assumptions
 
@@ -48,4 +48,4 @@ Auto-recovery дозволяти тільки для communication-loss class.
 Recovery policy має жити максимально близько до pump/VFD side, а не в зовнішньому сервісі.
 
 ### Rule 5
-Host/agent/bridge повинні бачити нормалізований стан, а не вгадувати серію VFD по непрямих ознаках.
+Host/driver/bridge повинні бачити нормалізований стан, а не вгадувати серію VFD по непрямих ознаках.
