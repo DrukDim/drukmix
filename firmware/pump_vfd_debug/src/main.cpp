@@ -1,12 +1,16 @@
 #include <Arduino.h>
 #include "debug_config.h"
 #include "vfd_m980_debug.h"
+#include "wifi_portal.h"
+#include "http_api.h"
 
 #ifndef BUILD_GIT_HASH
 #define BUILD_GIT_HASH "dev"
 #endif
 
 static VfdM980Debug g_vfd;
+static WifiPortal g_wifi;
+static HttpApi g_api(&g_vfd, &g_wifi);
 
 void setup() {
   Serial.begin(DEBUG_SERIAL_BAUD);
@@ -28,6 +32,15 @@ void setup() {
   Serial.println(UART_RTS_PIN);
 
   g_vfd.begin();
+  bool wifi_ok = g_wifi.begin();
+  Serial.print("wifi=");
+  Serial.println(wifi_ok ? "connected" : "failed");
+  if (wifi_ok) {
+    Serial.print("ip=");
+    Serial.println(g_wifi.ip_string());
+  }
+
+  g_api.begin();
 
   RuntimeSnapshot rt{};
   if (g_vfd.read_runtime_snapshot(&rt)) {
@@ -50,5 +63,6 @@ void setup() {
 }
 
 void loop() {
-  delay(1000);
+  g_api.handle_client();
+  delay(2);
 }

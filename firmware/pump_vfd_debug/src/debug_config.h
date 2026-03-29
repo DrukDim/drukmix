@@ -2,6 +2,8 @@
 #include <stdint.h>
 
 static constexpr int DEBUG_SERIAL_BAUD = 115200;
+static constexpr char DEBUG_HOSTNAME[] = "pump-vfd-debug";
+static constexpr char DEBUG_AP_NAME[] = "pump-vfd-debug";
 
 // RS485 / Modbus UART
 static constexpr int UART_BAUD = 9600;
@@ -12,3 +14,4 @@ static constexpr int UART_RTS_PIN = 4;
 static constexpr uint8_t MODBUS_SLAVE_ID = 1;
 
 static constexpr uint32_t MODBUS_REQ_TIMEOUT_MS = 120;
+static constexpr uint32_t HTTP_PORT = 80;
