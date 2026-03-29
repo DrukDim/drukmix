@@ -5,6 +5,7 @@
 #include "http_api.h"
 #include "config_store.h"
 #include "preset_store.h"
+#include "poll_manager.h"
 
 #ifndef BUILD_GIT_HASH
 #define BUILD_GIT_HASH "dev"
@@ -14,7 +15,8 @@ static VfdM980Debug g_vfd;
 static WifiPortal g_wifi;
 static ConfigStore g_config_store;
 static PresetStore g_preset_store;
-static HttpApi g_api(&g_vfd, &g_wifi, &g_config_store, &g_preset_store);
+static PollManager g_poll_manager(&g_vfd, &g_config_store, &g_preset_store);
+static HttpApi g_api(&g_vfd, &g_wifi, &g_config_store, &g_preset_store, &g_poll_manager);
 
 void setup() {
   Serial.begin(DEBUG_SERIAL_BAUD);
@@ -53,6 +55,8 @@ void setup() {
   Serial.println(preset_defaults_ok ? "ok" : "failed");
   Serial.print("modbus_config=");
   Serial.println(modbus_cfg_ok ? "ok" : "default");
+  Serial.print("poll_manager=");
+  Serial.println(g_poll_manager.begin() ? "ok" : "failed");
 
   bool wifi_ok = g_wifi.begin();
   Serial.print("wifi=");
@@ -85,6 +89,7 @@ void setup() {
 }
 
 void loop() {
+  g_poll_manager.update();
   g_api.handle_client();
   delay(2);
 }

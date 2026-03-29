@@ -5,16 +5,19 @@ HttpApi::HttpApi(
     VfdM980Debug* vfd,
     WifiPortal* wifi,
     ConfigStore* config_store,
-    PresetStore* preset_store)
+    PresetStore* preset_store,
+    PollManager* poll_manager)
     : vfd_(vfd),
       wifi_(wifi),
       config_store_(config_store),
       preset_store_(preset_store),
+      poll_manager_(poll_manager),
       server_(HTTP_PORT) {}
 
 void HttpApi::begin() {
   server_.on("/", HTTP_GET, [this]() { handle_root_(); });
   server_.on("/api/status", HTTP_GET, [this]() { handle_status_(); });
+  server_.on("/api/watch", HTTP_GET, [this]() { handle_watch_(); });
   server_.on("/api/config", HTTP_GET, [this]() { handle_config_(); });
   server_.on("/api/config/modbus", HTTP_POST, [this]() { handle_config_modbus_(); });
   server_.on("/api/config/poll", HTTP_POST, [this]() { handle_config_poll_(); });
@@ -37,7 +40,7 @@ void HttpApi::handle_root_() {
   String html;
   html += "<!doctype html><html><head><meta charset='utf-8'><title>pump_vfd_debug</title></head><body>";
   html += "<h1>pump_vfd_debug</h1>";
-  html += "<p>Use /api/status, /api/config, /api/presets</p>";
+  html += "<p>Use /api/status, /api/watch, /api/config, /api/presets</p>";
   html += "<p>Read: /api/read?reg=0xF000</p>";
   html += "<p>Read block: /api/read_block?reg=0x1000&count=7</p>";
   html += "<p>POST /api/write with reg and value params.</p>";
@@ -86,6 +89,44 @@ void HttpApi::handle_status_() {
   body += "}";
   body += "}";
 
+  send_json_(200, body);
+}
+
+void HttpApi::handle_watch_() {
+  if (!poll_manager_) {
+    send_json_(500, "{\"ok\":false,\"error\":\"poll_manager_unavailable\"}");
+    return;
+  }
+
+  WatchSnapshot watch{};
+  if (!poll_manager_->get_snapshot(&watch)) {
+    send_json_(500, "{\"ok\":false,\"error\":\"watch_snapshot_failed\"}");
+    return;
+  }
+
+  String body = "{";
+  body += "\"ok\":true,";
+  body += "\"preset\":\"" + json_escape_(watch.active_preset_name) + "\",";
+  body += "\"poll\":{";
+  body += "\"enabled\":" + String(watch.enabled ? "true" : "false") + ",";
+  body += "\"interval_ms\":" + String(watch.interval_ms) + ",";
+  body += "\"last_poll_ms\":" + String(watch.last_poll_ms) + ",";
+  body += "\"last_ok\":" + String(watch.last_ok ? "true" : "false") + ",";
+  body += "\"last_error\":\"" + json_escape_(watch.last_error) + "\"";
+  body += "},";
+  body += "\"values\":[";
+  for (size_t i = 0; i < watch.values.size(); i++) {
+    if (i) body += ",";
+    char regbuf[8];
+    snprintf(regbuf, sizeof(regbuf), "0x%04X", watch.values[i].reg);
+    body += "{";
+    body += "\"reg\":\"" + String(regbuf) + "\",";
+    body += "\"value\":" + String(watch.values[i].value) + ",";
+    body += "\"valid\":" + String(watch.values[i].valid ? "true" : "false");
+    body += "}";
+  }
+  body += "]";
+  body += "}";
   send_json_(200, body);
 }
 
@@ -202,6 +243,9 @@ void HttpApi::handle_config_poll_() {
     send_json_(500, "{\"ok\":false,\"error\":\"config_save_failed\"}");
     return;
   }
+  if (poll_manager_) {
+    poll_manager_->reload_poll_config();
+  }
 
   String body = "{";
   body += "\"ok\":true,";
@@ -289,6 +333,12 @@ void HttpApi::handle_presets_save_() {
     send_json_(500, "{\"ok\":false,\"error\":\"preset_save_failed\"}");
     return;
   }
+  if (poll_manager_ && config_store_) {
+    SystemConfig sys{};
+    if (config_store_->load_system_config(&sys) && sys.active_preset == preset.name) {
+      poll_manager_->reload_active_preset();
+    }
+  }
 
   String body = "{";
   body += "\"ok\":true,";
@@ -325,6 +375,9 @@ void HttpApi::handle_presets_load_() {
   if (!config_store_->save_system_config(sys)) {
     send_json_(500, "{\"ok\":false,\"error\":\"config_save_failed\"}");
     return;
+  }
+  if (poll_manager_) {
+    poll_manager_->reload_active_preset();
   }
 
   String body = "{";

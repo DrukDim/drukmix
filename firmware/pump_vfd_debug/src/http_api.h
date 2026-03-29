@@ -4,6 +4,7 @@
 #include "wifi_portal.h"
 #include "config_store.h"
 #include "preset_store.h"
+#include "poll_manager.h"
 
 class HttpApi {
 public:
@@ -11,7 +12,8 @@ public:
       VfdM980Debug* vfd,
       WifiPortal* wifi,
       ConfigStore* config_store,
-      PresetStore* preset_store);
+      PresetStore* preset_store,
+      PollManager* poll_manager);
 
   void begin();
   void handle_client();
@@ -21,10 +23,12 @@ private:
   WifiPortal* wifi_;
   ConfigStore* config_store_;
   PresetStore* preset_store_;
+  PollManager* poll_manager_;
   WebServer server_;
 
   void handle_root_();
   void handle_status_();
+  void handle_watch_();
   void handle_config_();
   void handle_config_modbus_();
   void handle_config_poll_();
