@@ -16,8 +16,8 @@ static void add_default_presets_(JsonObject presets) {
   JsonArray mode = presets["mode-switch"].to<JsonArray>();
   mode.add("0xF000");
   mode.add("0xF001");
-  mode.add("0xF018");
-  mode.add("0xF020");
+  mode.add("0xF012");
+  mode.add("0xF014");
   mode.add("0xF105");
   mode.add("0xF106");
   mode.add("0x100B");
@@ -59,9 +59,12 @@ bool PresetStore::begin() {
 }
 
 bool PresetStore::ensure_defaults() {
-  if (LittleFS.exists(PRESETS_PATH)) return true;
-
   JsonDocument doc;
+  if (!read_doc_(doc)) {
+    doc["version"] = 1;
+    doc["presets"].to<JsonObject>();
+  }
+
   doc["version"] = 1;
   JsonObject presets = doc["presets"].to<JsonObject>();
   add_default_presets_(presets);

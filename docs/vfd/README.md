@@ -47,6 +47,7 @@ Read this when:
 ### 4. Wiring and setup
 
 - [pump_vfd_wiring.md](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/pump_vfd_wiring.md)
+- [pump_vfd_debug.md](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/pump_vfd_debug.md)
 - [m980_setup_baseline.md](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/m980_setup_baseline.md)
 - [m980_commissioning_checklist.md](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/m980_commissioning_checklist.md)
 - [m980_local_remote_modes.md](/Users/dan/Library/Mobile%20Documents/com~apple~CloudDocs/Business/DrukDim/git/drukmix/docs/vfd/m980_local_remote_modes.md)
@@ -54,6 +55,7 @@ Read this when:
 Read these when:
 
 - wiring ESP to RS485 / VFD,
+- using and extending the standalone `pump_vfd_debug` firmware,
 - checking MCU pin assignments,
 - confirming the minimum M980-side configuration needed for communication control,
 - commissioning a reset M980 from motor nameplate entry through autotune,

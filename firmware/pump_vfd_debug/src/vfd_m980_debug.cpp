@@ -12,8 +12,10 @@ static constexpr uint16_t REG_OUT_CURRENT = 0x1006;
 
 static constexpr uint16_t REG_F0_00 = 0xF000;
 static constexpr uint16_t REG_F0_01 = 0xF001;
-static constexpr uint16_t REG_F0_18 = 0xF018;
-static constexpr uint16_t REG_F0_20 = 0xF020;
+// M980 parameter register addresses use the decimal parameter index in hex.
+// Example: F0-18 -> 0xF012, F0-20 -> 0xF014, F0-24 -> 0xF018.
+static constexpr uint16_t REG_F0_18 = 0xF012;
+static constexpr uint16_t REG_F0_20 = 0xF014;
 
 static constexpr uint16_t REG_F1_05 = 0xF105;
 static constexpr uint16_t REG_F1_06 = 0xF106;
