@@ -3,6 +3,8 @@
 #include "vfd_m980_debug.h"
 #include "wifi_portal.h"
 #include "http_api.h"
+#include "config_store.h"
+#include "preset_store.h"
 
 #ifndef BUILD_GIT_HASH
 #define BUILD_GIT_HASH "dev"
@@ -11,6 +13,8 @@
 static VfdM980Debug g_vfd;
 static WifiPortal g_wifi;
 static HttpApi g_api(&g_vfd, &g_wifi);
+static ConfigStore g_config_store;
+static PresetStore g_preset_store;
 
 void setup() {
   Serial.begin(DEBUG_SERIAL_BAUD);
@@ -32,6 +36,16 @@ void setup() {
   Serial.println(UART_RTS_PIN);
 
   g_vfd.begin();
+  bool cfg_ok = g_config_store.begin();
+  bool preset_fs_ok = g_preset_store.begin();
+  bool preset_defaults_ok = preset_fs_ok && g_preset_store.ensure_defaults();
+  Serial.print("config_store=");
+  Serial.println(cfg_ok ? "ok" : "failed");
+  Serial.print("preset_store=");
+  Serial.println(preset_fs_ok ? "ok" : "failed");
+  Serial.print("preset_defaults=");
+  Serial.println(preset_defaults_ok ? "ok" : "failed");
+
   bool wifi_ok = g_wifi.begin();
   Serial.print("wifi=");
   Serial.println(wifi_ok ? "connected" : "failed");
