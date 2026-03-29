@@ -145,78 +145,55 @@ For DrukMix control over Modbus:
 
 This is the canonical remote mode for the current `pump_vfd` firmware.
 
-## 7. Choose the local-manual family first
+## 7. Current proven manual/auto pairing
 
-There are two different local-manual models on M980 bring-up.
+The currently proven field pairing is:
 
-### Option A: panel-manual local mode
-
-Use this when the operator uses the drive's own front controls:
-
-- front `FWD / STOP / REV`
-- front speed knob, or a drive-local analog speed path already proven in field wiring
-
-Field-style setting:
-
-- `F0-00 = 0`
-- `F0-01 = 2`
+- local/manual:
+  - `F0-00 = 1`
+  - `F0-01 = 1`
+- remote/Modbus:
+  - `F0-00 = 2`
+  - `F0-01 = 8`
 
 Meaning:
 
-- run/stop from panel control
-- frequency from `AI1`
+- local manual = terminal command + panel potentiometer
+- remote auto = communication command + communication setting
 
-This matches your current M980 field experience better than the terminal-control model.
+## 8. Bind command source to frequency source
 
-### Option B: terminal-manual local mode
+The key parameter for clean switching is:
 
-Use this when local control really means:
+- `F0-18`
 
-- external potentiometer;
-- external FWD/STOP/REV switch wired to DI terminals.
+For the current proven pairing, set:
 
-- `F0-00 = 1` -> command source = terminal control
-- `F0-01 = 2` -> frequency source = `AI1`
+- `F0-18 = 820`
 
-## 8. Switching local/manual and Modbus/auto modes
+Meaning:
 
-### If local mode is panel-manual
+- terminal command binds to panel potentiometer
+- communication command binds to communication setting
 
-For a hardware button or maintained switch that toggles between:
+This is what makes one mode-switch input enough.
 
-- local manual: `F0-00 = 0`, `F0-01 = 2`
-- remote DrukMix: `F0-00 = 2`, `F0-01 = 8`
+## 9. Switching manual/auto modes
 
-use DI function:
+For the current proven pairing, use:
 
-- `19` -> running command switch terminal 1
+- one DI terminal with function `20`
 
 Vendor meaning:
 
-- keyboard/panel command <-> communication command switching
+- command source switching terminal 2
+- external terminal control <-> communication command control
 
-This is the correct choice when the manual side is the drive's own front controls.
-
-### If local mode is terminal-manual
-
-For a hardware button or switch that toggles between:
-
-- local manual control: `F0-00 = 1`, `F0-01 = 2`
-- remote DrukMix control: `F0-00 = 2`, `F0-01 = 8`
-
-use a DI terminal function with value:
-
-- `20` -> command source switching terminal 2
-
-Vendor meaning:
-
-- switches between external terminal control and communication command control.
+This is the correct mode switch because the local side is terminal command, not keyboard command.
 
 Do **not** use DI function `19` for this case.
 
-Function `19` is for keyboard/panel switching, not terminal-vs-Modbus switching.
-
-## 9. Universal stop input
+## 10. Universal stop input
 
 If you want one stop input that works regardless of the currently selected command source, use a DI terminal function:
 
@@ -231,7 +208,11 @@ Related functions:
 
 For pump work, `13` is the better default starting point unless you explicitly need coast stop or emergency stop behavior.
 
-## 10. Practical bring-up order
+If you want the front STOP key to stay effective in every mode, set:
+
+- `F0-20 = 1`
+
+## 11. Practical bring-up order
 
 1. Factory reset with `F0-24 = 1`.
 2. Enter motor nameplate `F8-00` ... `F8-04`.
@@ -245,26 +226,26 @@ For pump work, `13` is the better default starting point unless you explicitly n
    - `F7-01 = 0`
    - `F7-02 = 3`
    - `F7-03 = 1.0 s` as the initial value
-7. Choose your local-manual family:
-   - panel-manual: `F0-00 = 0`, `F0-01 = 2`
-   - terminal-manual: `F0-00 = 1`, `F0-01 = 2`
+7. Set the currently proven local manual mode:
+   - `F0-00 = 1`
+   - `F0-01 = 1`
 8. Set remote DrukMix mode:
    - `F0-00 = 2`
    - `F0-01 = 8`
-9. If you need a local/remote selector switch:
-   - use DI function `19` for panel-manual <-> Modbus
-   - use DI function `20` for terminal-manual <-> Modbus
-10. If you need one universal stop input, assign another DI terminal to function `13`.
-11. Only after that move on to ESP/RS485 wiring and live Modbus tests.
+9. Set command/frequency binding:
+   - `F0-18 = 820`
+10. Assign one DI terminal to function `20` for manual/Modbus mode switching.
+11. If you need one universal stop input, assign another DI terminal to function `13`.
+12. If you want the front STOP key always active, set `F0-20 = 1`.
+13. Only after that move on to ESP/RS485 wiring and live Modbus tests.
 
-## 11. Open gaps
+## 12. Open gaps
 
 This checklist still does not freeze:
 
-- which local-manual family becomes the canonical M980 field baseline;
 - the exact preferred deceleration/stop parameters for concrete pumping;
 - the exact DI terminal chosen in field wiring for local/remote switching;
-- the exact AI1 scaling and potentiometer wiring for local speed control;
+- the exact electrical wiring used for the manual/Modbus selector on this machine;
 - whether additional VFD-side protection or fault-reset policy should be part of the canonical baseline.
 
 Those should be added only after they are confirmed on real hardware.

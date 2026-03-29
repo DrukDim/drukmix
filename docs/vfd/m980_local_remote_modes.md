@@ -2,18 +2,34 @@
 
 ## Scope
 
-This file exists to prevent one very specific bring-up mistake:
+This file defines the currently proven local/manual and remote/Modbus mode pairing for the `M980`.
 
-- confusing panel control with terminal control.
+The main point is simple:
 
-For the current `M980` field workflow there are two distinct families of operating modes:
+- local/manual and remote/Modbus are not only different command sources;
+- they may also need different frequency sources;
+- the clean solution is to use command/frequency binding, not just `F0-00` alone.
 
-- panel-manual vs Modbus-remote;
-- terminal-manual vs Modbus-remote.
+## Current proven local/manual mode
 
-## Remote DrukMix mode
+The currently proven local mode on this machine is:
 
-When DrukMix controls the VFD through Modbus RTU:
+- `F0-00 = 1`
+- `F0-01 = 1`
+
+Meaning:
+
+- command source = terminal control
+- frequency source = panel potentiometer
+
+This matches the observed field behavior:
+
+- `FWD / STOP / REV` works;
+- the potentiometer also works correctly.
+
+## Current remote/Modbus mode
+
+The current remote mode for DrukMix is:
 
 - `F0-00 = 2`
 - `F0-01 = 8`
@@ -23,82 +39,79 @@ Meaning:
 - command source = communication control
 - frequency source = communication setting
 
-## Panel-manual mode
+## Parameter that makes switching clean
 
-This is the mode to use when the operator uses the drive's own front controls:
+The missing parameter is:
 
-- front potentiometer or built-in analog speed control;
-- front `FWD / STOP / REV` selector or keypad-side run controls.
+- `F0-18`
 
-The manual meaning is:
+Vendor meaning:
 
-- `F0-00 = 0` -> panel command source
+- ones digit = panel command binding frequency source
+- tens digit = terminal command binding frequency source
+- hundreds digit = communication command binding frequency source
 
-For some field setups, local frequency is still intentionally taken from `AI1`:
+For the current proven pairing, use:
 
-- `F0-01 = 2`
-
-That combination means:
-
-- run/stop from the panel;
-- frequency from `AI1`
-
-This is the correct local-manual interpretation if the local speed control is effectively routed through the drive-side analog input rather than through a pure keypad potentiometer mode.
-
-## Terminal-manual mode
-
-When the operator uses:
-
-- a potentiometer for speed;
-- a physical forward/stop/reverse switch;
-
-the local mode is:
-
-- `F0-00 = 1`
-- `F0-01 = 2`
+- `F0-18 = 820`
 
 Meaning:
 
-- command source = terminal control
-- frequency source = `AI1`
+- panel binding = `0` -> no binding
+- terminal binding = `2` -> panel potentiometer
+- communication binding = `8` -> communication setting
 
-## Important distinction
+With this in place:
 
-- `F0-00 = 0`, `F0-01 = 2` means panel-manual command with `AI1` frequency source.
-- `F0-00 = 1`, `F0-01 = 2` means terminal-manual command with `AI1` frequency source.
+- terminal command automatically uses the panel potentiometer;
+- communication command automatically uses communication frequency;
+- one command-source switch input is enough for mode switching.
 
-They are not the same mode.
+## DI function for mode switching
 
-## DI switching for panel-manual <-> Modbus-remote
-
-If one external button/switch should toggle between:
-
-- keyboard / panel-manual control
-- communication control
-
-then the relevant DI function is:
-
-- `19` -> running command switch terminal 1
-
-This is the vendor-documented mode switch for keyboard vs communication selection when `F0-00 = 2`.
-
-Practical rule:
-
-- default state can remain `F0-00 = 2` for Modbus control;
-- when the DI becomes valid, the drive switches to keyboard / panel-manual command;
-- when it becomes invalid again, it returns to communication command.
-
-## DI switching for terminal-manual <-> Modbus-remote
-
-If one external button/switch should toggle between:
-
-- terminal control
-- communication control
-
-then the relevant DI function is:
+For the current proven pairing, use:
 
 - `20` -> command source switching terminal 2
 
-This is the vendor-documented mode switch for:
+Reason:
 
-- external terminal control <-> communication command control
+- local/manual command source is terminal control;
+- remote/auto command source is communication control.
+
+Function `19` is not the right one here.
+It is for keyboard/panel switching, not terminal-vs-communication switching.
+
+## Recommended practical mode set
+
+Program these values:
+
+- local/manual baseline:
+  - `F0-00 = 1`
+  - `F0-01 = 1`
+- remote/Modbus baseline:
+  - `F0-00 = 2`
+  - `F0-01 = 8`
+- binding:
+  - `F0-18 = 820`
+- mode switch input:
+  - one DI terminal = function `20`
+
+## Universal stop
+
+If you need one stop input that works regardless of current command source, use another DI terminal with:
+
+- `13` -> external terminal shutdown, valid at any time
+
+If you also want the front STOP key to work in every mode, set:
+
+- `F0-20 = 1`
+
+## Wiring implication
+
+For this mode model:
+
+- one DI input is needed for manual/Modbus switching;
+- one separate DI input is recommended for universal stop.
+
+If your hardware switch has only one changeover contact `NO / S / NC`, it is suitable for the mode switch alone.
+Do not try to combine mode switch and universal stop into the same single contact.
