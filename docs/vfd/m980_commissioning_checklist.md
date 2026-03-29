@@ -91,7 +91,52 @@ Reason:
 - `0.0 s` disables communication-timeout detection;
 - values above `0.1 s` allow the VFD to raise communication fault `Err16` if traffic disappears.
 
-## 5. Modbus control mode required by DrukMix
+## 5. Motor control mode: V/F or vector
+
+M980 motor control parameter:
+
+- `F8-06`
+
+Vendor meanings:
+
+- `0` -> `V/F` control
+- `1` -> vector speed control of asynchronous motor
+- `2` -> vector speed control of synchronous motor
+
+For a standard asynchronous motor driving a gerotor/progressive-cavity pump with:
+
+- heavy mixture,
+- frequent frequency changes,
+- low-speed load sensitivity,
+- continuous Modbus speed control,
+
+the recommended starting point is:
+
+- `F8-06 = 1`
+
+Reason:
+
+- better low-speed torque behavior;
+- better load regulation when the mix gets heavier;
+- better match for frequent speed changes than plain `V/F`.
+
+Fallback:
+
+- if vector mode becomes unstable,
+- or autotune cannot be completed correctly,
+- or the motor data is not trustworthy,
+
+fall back temporarily to:
+
+- `F8-06 = 0`
+
+and treat that as a degraded-but-simple baseline while the motor data and tuning are corrected.
+
+Important:
+
+- if `F8-06 = 1`, perform `F8-07` parameter identification after entering the motor nameplate values.
+
+## 6. Modbus control mode required by DrukMix
 
 For DrukMix control over Modbus:
 
@@ -100,28 +145,59 @@ For DrukMix control over Modbus:
 
 This is the canonical remote mode for the current `pump_vfd` firmware.
 
-## 6. Local manual mode for potentiometer + FWD/STOP/REV switch
+## 7. Choose the local-manual family first
 
-This is the important correction:
+There are two different local-manual models on M980 bring-up.
 
-If local control really means:
+### Option A: panel-manual local mode
 
-- speed from potentiometer;
-- direction/start from external switch or toggle;
+Use this when the operator uses the drive's own front controls:
 
-then local mode is **terminal control**, not panel control.
+- front `FWD / STOP / REV`
+- front speed knob, or a drive-local analog speed path already proven in field wiring
 
-Use:
+Field-style setting:
+
+- `F0-00 = 0`
+- `F0-01 = 2`
+
+Meaning:
+
+- run/stop from panel control
+- frequency from `AI1`
+
+This matches your current M980 field experience better than the terminal-control model.
+
+### Option B: terminal-manual local mode
+
+Use this when local control really means:
+
+- external potentiometer;
+- external FWD/STOP/REV switch wired to DI terminals.
 
 - `F0-00 = 1` -> command source = terminal control
 - `F0-01 = 2` -> frequency source = `AI1`
 
-Do **not** treat this as `F0-00 = 0`.
+## 8. Switching local/manual and Modbus/auto modes
 
-`F0-00 = 0` means panel run/stop from the keypad.
-That does not match a hardware `FWD/STOP/REV` switch as the command source.
+### If local mode is panel-manual
 
-## 7. Switching between local terminal control and Modbus control
+For a hardware button or maintained switch that toggles between:
+
+- local manual: `F0-00 = 0`, `F0-01 = 2`
+- remote DrukMix: `F0-00 = 2`, `F0-01 = 8`
+
+use DI function:
+
+- `19` -> running command switch terminal 1
+
+Vendor meaning:
+
+- keyboard/panel command <-> communication command switching
+
+This is the correct choice when the manual side is the drive's own front controls.
+
+### If local mode is terminal-manual
 
 For a hardware button or switch that toggles between:
 
@@ -138,33 +214,54 @@ Vendor meaning:
 
 Do **not** use DI function `19` for this case.
 
-Function `19` is:
+Function `19` is for keyboard/panel switching, not terminal-vs-Modbus switching.
 
-- keyboard/existing command-source switching
+## 9. Universal stop input
 
-and is not the clean terminal-vs-Modbus switch you described.
+If you want one stop input that works regardless of the currently selected command source, use a DI terminal function:
 
-## 8. Practical bring-up order
+- `13` -> external terminal shutdown, valid at any time
+
+This is the cleanest candidate for a non-emergency universal stop because it is documented as valid at any time and uses deceleration time 2.
+
+Related functions:
+
+- `12` -> coast stop
+- `14` -> emergency stop
+
+For pump work, `13` is the better default starting point unless you explicitly need coast stop or emergency stop behavior.
+
+## 10. Practical bring-up order
 
 1. Factory reset with `F0-24 = 1`.
 2. Enter motor nameplate `F8-00` ... `F8-04`.
-3. Run autotune using `F8-07 = 1` or `2` as appropriate.
-4. Confirm motor can run safely in local mode first.
-5. Set Modbus parameters:
+3. Select motor control mode:
+   - recommended start: `F8-06 = 1`
+   - fallback: `F8-06 = 0`
+4. Run autotune using `F8-07 = 1` or `2` as appropriate.
+5. Confirm motor can run safely in local mode first.
+6. Set Modbus parameters:
    - `F7-00 = 1`
    - `F7-01 = 0`
    - `F7-02 = 3`
    - `F7-03 = 1.0 s` as the initial value
-6. Set remote DrukMix mode:
+7. Choose your local-manual family:
+   - panel-manual: `F0-00 = 0`, `F0-01 = 2`
+   - terminal-manual: `F0-00 = 1`, `F0-01 = 2`
+8. Set remote DrukMix mode:
    - `F0-00 = 2`
    - `F0-01 = 8`
-7. If you need a local/remote selector switch, assign one DI terminal to function `20`.
-8. Only after that move on to ESP/RS485 wiring and live Modbus tests.
+9. If you need a local/remote selector switch:
+   - use DI function `19` for panel-manual <-> Modbus
+   - use DI function `20` for terminal-manual <-> Modbus
+10. If you need one universal stop input, assign another DI terminal to function `13`.
+11. Only after that move on to ESP/RS485 wiring and live Modbus tests.
 
-## 9. Open gaps
+## 11. Open gaps
 
 This checklist still does not freeze:
 
+- which local-manual family becomes the canonical M980 field baseline;
 - the exact preferred deceleration/stop parameters for concrete pumping;
 - the exact DI terminal chosen in field wiring for local/remote switching;
 - the exact AI1 scaling and potentiometer wiring for local speed control;
