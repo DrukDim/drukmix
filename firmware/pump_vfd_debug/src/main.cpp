@@ -12,9 +12,9 @@
 
 static VfdM980Debug g_vfd;
 static WifiPortal g_wifi;
-static HttpApi g_api(&g_vfd, &g_wifi);
 static ConfigStore g_config_store;
 static PresetStore g_preset_store;
+static HttpApi g_api(&g_vfd, &g_wifi, &g_config_store, &g_preset_store);
 
 void setup() {
   Serial.begin(DEBUG_SERIAL_BAUD);
@@ -24,10 +24,6 @@ void setup() {
   Serial.println("=== PUMP_VFD_DEBUG BOOT ===");
   Serial.print("git=");
   Serial.println(BUILD_GIT_HASH);
-  Serial.print("modbus slave=");
-  Serial.println(MODBUS_SLAVE_ID);
-  Serial.print("uart baud=");
-  Serial.println(UART_BAUD);
   Serial.print("pins rx/tx/rts=");
   Serial.print(UART_RX_PIN);
   Serial.print("/");
@@ -35,16 +31,28 @@ void setup() {
   Serial.print("/");
   Serial.println(UART_RTS_PIN);
 
-  g_vfd.begin();
   bool cfg_ok = g_config_store.begin();
   bool preset_fs_ok = g_preset_store.begin();
   bool preset_defaults_ok = preset_fs_ok && g_preset_store.ensure_defaults();
+  ModbusConfig modbus_cfg{};
+  bool modbus_cfg_ok = cfg_ok && g_config_store.load_modbus_config(&modbus_cfg);
+  if (modbus_cfg_ok) {
+    g_vfd.apply_modbus_config(modbus_cfg);
+  } else {
+    g_vfd.begin();
+  }
+  Serial.print("modbus slave=");
+  Serial.println(g_vfd.modbus_config().slave_id);
+  Serial.print("uart baud=");
+  Serial.println(g_vfd.modbus_config().baud);
   Serial.print("config_store=");
   Serial.println(cfg_ok ? "ok" : "failed");
   Serial.print("preset_store=");
   Serial.println(preset_fs_ok ? "ok" : "failed");
   Serial.print("preset_defaults=");
   Serial.println(preset_defaults_ok ? "ok" : "failed");
+  Serial.print("modbus_config=");
+  Serial.println(modbus_cfg_ok ? "ok" : "default");
 
   bool wifi_ok = g_wifi.begin();
   Serial.print("wifi=");

@@ -4,12 +4,12 @@
 
 static HardwareSerial& VFD_SERIAL = Serial2;
 
-void Rs485Modbus::begin() {
+void Rs485Modbus::begin(uint32_t baud) {
   pinMode(UART_RTS_PIN, OUTPUT);
   set_tx_mode_(false);
 
   VFD_SERIAL.begin(
-      UART_BAUD,
+      baud,
       SERIAL_8N1,
       UART_RX_PIN,
       UART_TX_PIN);
@@ -73,7 +73,7 @@ bool Rs485Modbus::txrx_(
   return n > 0;
 }
 
-bool Rs485Modbus::write_single_register(uint8_t slave, uint16_t reg, uint16_t value) {
+bool Rs485Modbus::write_single_register(uint8_t slave, uint16_t reg, uint16_t value, uint32_t timeout_ms) {
   uint8_t tx[8];
   tx[0] = slave;
   tx[1] = 0x06;
@@ -88,7 +88,7 @@ bool Rs485Modbus::write_single_register(uint8_t slave, uint16_t reg, uint16_t va
 
   uint8_t rx[16];
   uint16_t rx_len = 0;
-  if (!txrx_(tx, sizeof(tx), rx, sizeof(rx), &rx_len, MODBUS_REQ_TIMEOUT_MS)) return false;
+  if (!txrx_(tx, sizeof(tx), rx, sizeof(rx), &rx_len, timeout_ms)) return false;
   if (rx_len != 8) return false;
 
   uint16_t got_crc = (uint16_t)rx[6] | ((uint16_t)rx[7] << 8);
@@ -133,7 +133,7 @@ bool Rs485Modbus::write_single_register_broadcast(uint16_t reg, uint16_t value) 
   return true;
 }
 
-bool Rs485Modbus::read_holding_registers(uint8_t slave, uint16_t reg, uint16_t count, uint16_t* out) {
+bool Rs485Modbus::read_holding_registers(uint8_t slave, uint16_t reg, uint16_t count, uint16_t* out, uint32_t timeout_ms) {
   if (!out || count == 0 || count > 16) return false;
 
   uint8_t tx[8];
@@ -150,7 +150,7 @@ bool Rs485Modbus::read_holding_registers(uint8_t slave, uint16_t reg, uint16_t c
 
   uint8_t rx[64];
   uint16_t rx_len = 0;
-  if (!txrx_(tx, sizeof(tx), rx, sizeof(rx), &rx_len, MODBUS_REQ_TIMEOUT_MS)) return false;
+  if (!txrx_(tx, sizeof(tx), rx, sizeof(rx), &rx_len, timeout_ms)) return false;
 
   uint16_t expected = (uint16_t)(5 + 2 * count);
   if (rx_len != expected) return false;

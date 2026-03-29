@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include "rs485_modbus.h"
+#include "config_store.h"
 
 struct RuntimeSnapshot {
   bool valid = false;
@@ -34,6 +35,8 @@ struct ModbusSnapshot {
 class VfdM980Debug {
 public:
   void begin();
+  void apply_modbus_config(const ModbusConfig& cfg);
+  ModbusConfig modbus_config() const;
   bool read_reg(uint16_t reg, uint16_t* value);
   bool read_block(uint16_t reg, uint16_t count, uint16_t* out);
   bool write_reg(uint16_t reg, uint16_t value);
@@ -44,4 +47,5 @@ public:
 
 private:
   Rs485Modbus modbus_;
+  ModbusConfig cfg_{};
 };
