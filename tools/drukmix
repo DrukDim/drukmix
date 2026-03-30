@@ -508,11 +508,37 @@ install_service_unit() {
   sudo systemctl daemon-reload
 }
 
+tty_id_path_tag() {
+  local port="$1"
+  [[ -n "$port" && -e "$port" ]] || return 1
+  udevadm info -q property -n "$port" 2>/dev/null | awk -F= '/^ID_PATH_TAG=/{print $2; exit}'
+}
+
 install_bridge_udev_rule() {
+  local port="${1:-}"
+  local path_tag=""
+  if [[ -n "$port" ]]; then
+    path_tag="$(tty_id_path_tag "$port" || true)"
+  elif bridge_alias_exists; then
+    path_tag="$(tty_id_path_tag "$BRIDGE_ALIAS" || true)"
+  else
+    local candidate=""
+    candidate="$(select_bridge_flash_port "" 2>/dev/null || true)"
+    if [[ -n "$candidate" ]]; then
+      path_tag="$(tty_id_path_tag "$candidate" || true)"
+    fi
+  fi
+
   sudo mkdir -p "$(dirname "$UDEV_RULE_DST")"
-  sudo tee "$UDEV_RULE_DST" >/dev/null <<'EOF'
+  if [[ -n "$path_tag" ]]; then
+    sudo tee "$UDEV_RULE_DST" >/dev/null <<EOF
+SUBSYSTEM=="tty", ENV{ID_VENDOR_ID}=="10c4", ENV{ID_MODEL_ID}=="ea60", ENV{ID_PATH_TAG}=="$path_tag", SYMLINK+="drukos-bridge", MODE:="0660", GROUP:="dialout"
+EOF
+  else
+    sudo tee "$UDEV_RULE_DST" >/dev/null <<'EOF'
 SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", ATTRS{serial}=="0001", SYMLINK+="drukos-bridge", MODE:="0660", GROUP:="dialout"
 EOF
+  fi
   sudo chmod 0644 "$UDEV_RULE_DST"
 }
 
@@ -1046,7 +1072,7 @@ cmd_flash_app() {
 
   if [[ "$app" == "bridge" ]]; then
     print_step "Host Integration"
-    install_bridge_udev_rule
+    install_bridge_udev_rule "$port"
     reload_udev_rules
     sleep 2
 
