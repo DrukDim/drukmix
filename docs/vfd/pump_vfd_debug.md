@@ -1144,6 +1144,72 @@ Meaning:
 - `F0-18 = 10` did not break the direct communication-side workflow
 - with `DI3 open`, command and frequency authority still follow Modbus in the tested auto-first profile
 
+### T017 - Repeated `DI3` operator workflow cycles with `F0-18 = 10`
+
+Base profile:
+
+- `F0-00 = 2`
+- `F0-01 = 8`
+- `F0-02 = 0`
+- `F0-03 = 0`
+- `F0-18 = 10`
+- `F1-02 = 20`
+- `F1-03 = 0`
+
+Fixed physical setup for the series:
+
+- selector in `FWD`
+- built-in potentiometer around mid position
+
+Observed runtime sequence:
+
+- `baseline_open_stopped`
+  - `run_state = 3`
+  - `actual_freq = 0`
+  - `speed = 0`
+  - `current = 0`
+  - `di_state = 1`
+- `cycle1_manual_active`
+  - `run_state = 1`
+  - `actual_freq = 130`
+  - `speed = 421`
+  - `current = 4`
+  - `di_state = 5`
+- `cycle1_auto_open_run500`
+  - `run_state = 1`
+  - `actual_freq = 25`
+  - `speed = 66`
+  - `current = 3`
+  - `di_state = 1`
+- `cycle2_manual_active`
+  - `run_state = 1`
+  - `actual_freq = 155`
+  - `speed = 487`
+  - `current = 4`
+  - `di_state = 5`
+- `cycle2_auto_open_run800`
+  - `run_state = 1`
+  - `actual_freq = 40`
+  - `speed = 106`
+  - `current = 5`
+  - `di_state = 1`
+
+Final-stop note:
+
+- the scripted final read timed out after the last `STOP`
+- separate direct `curl` reads immediately after that timeout confirmed:
+  - `run_state = 3`
+  - `actual_freq = 0`
+  - `speed = 0`
+  - `current = 0`
+
+Meaning:
+
+- `F0-18 = 10` survived repeated `manual -> auto -> manual -> auto` switching through `DI3`
+- manual-side delivered behavior tracks the built-in selector and potentiometer
+- auto-side delivered behavior tracks Modbus setpoint changes
+- this is currently the strongest confirmed operator-workflow candidate found in field tests
+
 ## Open Questions
 
 The following are still open and must not be treated as settled truth yet:
