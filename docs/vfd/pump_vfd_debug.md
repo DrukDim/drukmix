@@ -830,6 +830,20 @@ Meaning:
 - even though `DI20` and `DI24` exist,
 - they may not be enough to recreate full communication mode for this exact use case
 
+### Interpretation B1: `F0-18` terminal-binding digit may be the key missing gate
+
+Current probability: medium to high.
+
+Meaning:
+
+- current field work now shows a strong distinction between:
+  - `F0-18 = 1`
+  - and `F0-18 = 10`
+- with `DI3 = 20` active in an auto-first profile, `1` is not enough to make the built-in potentiometer effective
+- but `10` is enough to make the built-in potentiometer effective while preserving selector-driven command behavior
+
+This is now the strongest live clue that the effective binding for the required hybrid manual override may sit specifically in the terminal-binding digit, not in the panel-binding digit.
+
 ### Interpretation C: profile switching may be the real solution family
 
 Current probability: high.
@@ -1054,11 +1068,88 @@ Meaning:
 - even with explicit `DI24` frequency switching and a dual-source profile,
 - the tested `F0-18` variants did not restore the required hybrid manual mode
 
+### T015 - Terminal-binding isolation inside `F0-18`
+
+Base profile:
+
+- `F0-00 = 2`
+- `F0-01 = 8`
+- `F0-02 = 0`
+- `F0-03 = 0`
+- `F1-02 = 20`
+- `F1-03 = 0`
+
+Manual-side test setup:
+
+- `DI3 active`
+- selector in `FWD`
+- built-in potentiometer around mid position
+
+Observed results:
+
+- `F0-18 = 1`
+  - `run_state = 1`
+  - `actual_freq = 0`
+  - `speed = 0`
+  - `current = 4`
+  - `U0-11 = 5`
+- `F0-18 = 10`
+  - `run_state = 1`
+  - `actual_freq = 109` and later `141`
+  - `speed = 364` and later `374`
+  - `current = 4`
+  - `U0-11 = 5`
+- `F0-18 = 11`
+  - same effective delivered result as `10`
+- `F0-18 = 12`
+  - same effective delivered result as `10`
+- `F0-18 = 19`
+  - same effective delivered result as `10`
+
+Meaning:
+
+- the decisive change is the tens digit, not the ones digit
+- current evidence points to the terminal-binding digit as the relevant gate for restoring the built-in potentiometer during manual override
+- the ones digit did not materially change delivered behavior in the tested `1x` set
+
+### T016 - Auto-side confirmation with `F0-18 = 10`
+
+Base profile:
+
+- `F0-00 = 2`
+- `F0-01 = 8`
+- `F0-02 = 0`
+- `F0-03 = 0`
+- `F0-18 = 10`
+- `F1-02 = 20`
+- `F1-03 = 0`
+
+Auto-side test setup:
+
+- `DI3 open`
+- local selector in `STOP`
+- built-in potentiometer at `0`
+
+Observed result:
+
+- after Modbus `0x0001 = 500`, `0x0002 = 1`:
+  - `run_state = 1`
+  - `actual_freq = 25`
+  - `speed = 66`
+  - `current = 5`
+  - `U0-11 = 0`
+
+Meaning:
+
+- `F0-18 = 10` did not break the direct communication-side workflow
+- with `DI3 open`, command and frequency authority still follow Modbus in the tested auto-first profile
+
 ## Open Questions
 
 The following are still open and must not be treated as settled truth yet:
 
 - whether `DI20/24` can ever reproduce the direct communication baseline without explicit `F0-00 = 2`, `F0-01 = 8`
+- whether `F0-18 = 10` is the minimal final working value or just the first confirmed member of a broader working family
 - whether there is another required gate parameter near the source-selection group
 - whether vendor internal PLC/runtime logic can switch full profiles from DI state
 - whether a controller-driven full-profile switch is the final practical solution
@@ -1086,9 +1177,10 @@ Rules:
 Current narrowed focus inside this family:
 
 - do not keep re-testing `20 / 800 / 820 / 900 / 920` in the already-covered base profiles above
+- prefer terminal-binding isolation tests before broad new brute-force sweeps
 - if binding-family testing continues, it should target genuinely new combinations such as:
-  - different terminal binding digit candidates
-  - different communication binding digit candidates
+  - different terminal-binding candidates around the now-confirmed working `1x` family
+  - different communication-binding digit candidates once the terminal-binding side is stabilized
   - different declared `F0-00..F0-03` source architectures
 - every new test must state exactly which family/profile it belongs to
 
