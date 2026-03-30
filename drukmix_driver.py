@@ -528,17 +528,24 @@ class Driver:
                 backoff = 0.5
             except Exception as e:
                 self.log.error(f"driver loop error: {e}")
+                # Keep Moonraker connected if possible; most loop errors here are
+                # transport/backend IO (USB serial EIO/disconnect). Fail safe,
+                # then reset the backend transport so the driver can recover
+                # without requiring a service restart.
                 try:
                     self.backend.stop()
                 except Exception:
                     pass
                 try:
-                    if self.mr:
-                        await self.mr.close()
+                    self.backend.close()
                 except Exception:
                     pass
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2.0, 10.0)
+                try:
+                    self.backend.open()
+                except Exception as e2:
+                    self.log.error(f"backend reopen failed: {e2}")
 
     async def _tick(self, msg):
         now = time.monotonic()
@@ -646,11 +653,17 @@ class Driver:
                     self.status.reason,
                 )
             if blocked:
-                self.backend.stop()
+                try:
+                    self.backend.stop()
+                except Exception as e:
+                    self.log.warning(f"backend stop failed: {e}")
             else:
                 pct = max(0.0, min(100.0, float(self.status.target_pct)))
                 rev = bool(self.status.rev)
-                self.backend.set_auto_target_pct(pct, rev)
+                try:
+                    self.backend.set_auto_target_pct(pct, rev)
+                except Exception as e:
+                    self.log.warning(f"backend set target failed: {e}")
 
 
 async def run_driver(cfg_path: str):
