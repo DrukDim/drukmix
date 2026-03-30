@@ -44,6 +44,7 @@ SERVICE_TEMPLATE="$REPO_DIR/systemd/drukmix.service"
 KLIPPER_EXTRA_SRC="$REPO_DIR/klipper_extra/drukmix_planner_probe.py"
 KLIPPER_CONTROLLER_SRC="$REPO_DIR/klipper_extra/drukmix_controller.py"
 FLASH_HELPER="$REPO_DIR/tools/flash_firmware.sh"
+VFD_CLI="$REPO_DIR/tools/vfd_cli.py"
 SUPPORTED_PROFILES=("main" "brama" "duet")
 
 print_header() {
@@ -173,9 +174,18 @@ ensure_venv() {
   fi
 }
 
+repo_python() {
+  if [[ -x "$REPO_DIR/.venv/bin/python" ]]; then
+    printf '%s\n' "$REPO_DIR/.venv/bin/python"
+  else
+    printf '%s\n' python3
+  fi
+}
+
 compile_check() {
   "$REPO_DIR/.venv/bin/python" -m py_compile \
     "$REPO_DIR/drukmix_driver.py" \
+    "$REPO_DIR/tools/vfd_cli.py" \
     "$REPO_DIR/backend/pump_backend_base.py" \
     "$REPO_DIR/backend/backend_pumpvfd.py" \
     "$REPO_DIR/backend/backend_pumptpl.py" \
@@ -719,6 +729,10 @@ DrukMix CLI
 Usage:
   drukmix help
   drukmix check
+  drukmix vfd check
+  drukmix vfd read <reg>
+  drukmix vfd write <reg> <value>
+  drukmix vfd preset [action] [name]
   drukmix install <profile>
   drukmix uninstall
   drukmix flash bridge [port]
@@ -734,6 +748,8 @@ Notes:
   - This tool works from the local repo checkout.
   - Repo updates are expected to come from Moonraker update_manager.
   - For an easier shell command, run: ./tools/drukmix-setup
+  - `drukmix check` remains install/runtime readiness.
+  - `drukmix vfd ...` is the separate VFD operator/service namespace.
 EOF
 }
 
@@ -959,6 +975,47 @@ cmd_uninstall() {
   print_ok "state" "DrukMix uninstall completed"
 }
 
+cmd_vfd() {
+  local action="${1:-check}"
+  local py
+
+  require_repo_layout
+  require_python
+  if [[ ! -f "$VFD_CLI" ]]; then
+    echo "VFD helper not found: $VFD_CLI"
+    exit 2
+  fi
+  py="$(repo_python)"
+
+  case "$action" in
+    check)
+      "$py" "$VFD_CLI" --config "$DRIVER_CFG_DST" check
+      ;;
+    read)
+      if [[ -z "${2:-}" ]]; then
+        echo "Usage: drukmix vfd read <reg>"
+        exit 2
+      fi
+      "$py" "$VFD_CLI" --config "$DRIVER_CFG_DST" read "${2}"
+      ;;
+    write)
+      if [[ -z "${2:-}" || -z "${3:-}" ]]; then
+        echo "Usage: drukmix vfd write <reg> <value>"
+        exit 2
+      fi
+      "$py" "$VFD_CLI" --config "$DRIVER_CFG_DST" write "${2}" "${3}"
+      ;;
+    preset)
+      "$py" "$VFD_CLI" --config "$DRIVER_CFG_DST" preset "${2:-list}" "${3:-}"
+      ;;
+    *)
+      echo "Unknown VFD action: $action"
+      echo "Usage: drukmix vfd <check|read|write|preset> ..."
+      exit 2
+      ;;
+  esac
+}
+
 cmd_flash_app() {
   local app="$1"
   local target="$2"
@@ -1035,6 +1092,9 @@ case "$cmd" in
     ;;
   uninstall)
     cmd_uninstall
+    ;;
+  vfd)
+    cmd_vfd "${2:-check}" "${3:-}" "${4:-}"
     ;;
   flash)
     case "${2:-}" in

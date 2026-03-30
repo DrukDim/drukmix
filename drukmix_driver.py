@@ -58,6 +58,7 @@ class Cfg:
     status_timeout_s: float
     ui_notify: bool
     log_file: str
+    status_file: str
     log_level: str
     debug_log: bool
     debug_log_period_s: float
@@ -120,6 +121,11 @@ def load_cfg(path: str) -> Cfg:
         ui_notify=get_bool("ui_notify", True),
         log_file=_get_str(
             s, "log_file", os.path.expanduser("~/printer_data/logs/drukmix_driver.log")
+        ),
+        status_file=_get_str(
+            s,
+            "status_file",
+            os.path.expanduser("~/printer_data/logs/drukmix_status.json"),
         ),
         log_level=_get_str(s, "log_level", "info").lower(),
         debug_log=get_bool("debug_log", False),
@@ -287,6 +293,8 @@ class Driver:
         self.status = ControllerStatus()
         self._last_debug_t: float = 0.0
         self._subscribed: bool = False
+        self._backend_status = None
+        self._backend_status_t: float = 0.0
 
     async def start(self):
         if self.cfg.transport == "fake":
@@ -412,7 +420,7 @@ class Driver:
         now = time.monotonic()
         if method == "drukmix_status":
             await self._refresh_controller_status()
-            backend = self.backend.poll_status()
+            backend = self._poll_backend_status(now, force=True)
             flush_active = self.flush_active
             flush_remaining = (
                 max(0.0, self.flush_until - now) if self.flush_until > 0.0 else 0.0
@@ -481,6 +489,34 @@ class Driver:
             await self.mr.respond(level, msg)
         except Exception:
             pass
+
+    def _write_status_snapshot(self, backend, now: float):
+        payload = {
+            "updated_unix_s": time.time(),
+            "updated_monotonic_s": float(now),
+            "controller": dataclasses.asdict(self.status),
+            "backend": dataclasses.asdict(backend),
+        }
+        os.makedirs(os.path.dirname(self.cfg.status_file), exist_ok=True)
+        tmp_path = f"{self.cfg.status_file}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, sort_keys=True)
+        os.replace(tmp_path, self.cfg.status_file)
+
+    def _poll_backend_status(self, now: float, force: bool = False):
+        min_period_s = 1.0 / max(0.5, self.cfg.update_hz)
+        if (
+            not force
+            and self._backend_status is not None
+            and (now - self._backend_status_t) < min_period_s
+        ):
+            return self._backend_status
+
+        backend = self.backend.poll_status()
+        self._backend_status = backend
+        self._backend_status_t = now
+        self._write_status_snapshot(backend, now)
+        return backend
 
     async def _loop(self):
         backoff = 0.5
@@ -584,6 +620,8 @@ class Driver:
             self.flush_pct = 0.0
             self.flush_rev = False
             self.backend.stop()
+
+        self._poll_backend_status(now)
 
         # Apply controller status (unless flushing)
         if not self.flush_active:
