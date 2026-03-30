@@ -576,6 +576,25 @@ Confirmed live behavior:
 This direct communication baseline is critical.
 It proves that the `M980` communication-frequency path is real and working when the drive is placed into explicit communication mode.
 
+### Direct profile switching without power-cycle
+
+The following has now also been confirmed live:
+
+- switching from the clean manual baseline to the clean direct communication baseline works without a drive power-cycle
+- switching back from the clean direct communication baseline to the clean manual baseline also works without a drive power-cycle
+
+Confirmed live sequence:
+
+1. apply manual profile
+2. verify selector + potentiometer
+3. write full auto profile
+4. verify Modbus run + delivered communication frequency
+5. stop the drive fully
+6. write full manual profile again
+7. verify selector + potentiometer again
+
+This is currently the strongest confirmed solution family for manual/auto switching.
+
 ## Confirmed DI Function Behavior
 
 ### `DI3 = 20`
@@ -750,7 +769,7 @@ Meaning:
 
 ### Interpretation C: profile switching may be the real solution family
 
-Current probability: medium.
+Current probability: high.
 
 Meaning:
 
@@ -759,6 +778,13 @@ Meaning:
   - controller-driven parameter writes,
   - vendor runtime logic if supported,
   - or another higher-level mechanism
+
+This interpretation is now strengthened by live proof that:
+
+- `manual profile -> auto profile -> manual profile`
+- works in both directions
+- without a power-cycle
+- while preserving the expected behavior on both sides
 
 ## Test Ledger
 
@@ -853,6 +879,35 @@ Result:
 - this path is still incomplete
 - it has not yet reproduced the same behavior as the direct communication baseline
 
+### T011 - Full-profile switching without power-cycle
+
+Manual profile:
+
+- `F0-00 = 1`
+- `F0-01 = 1`
+- `F0-02 = 0`
+- `F0-03 = 0`
+- `F0-18 = 0`
+- `F1-02 = 0`
+- `F1-03 = 0`
+
+Auto profile:
+
+- `F0-00 = 2`
+- `F0-01 = 8`
+- `F0-02 = 0`
+- `F0-03 = 0`
+- `F0-18 = 0`
+- `F1-02 = 0`
+- `F1-03 = 0`
+
+Result:
+
+- drive accepts full profile rewrite without power-cycle
+- auto profile gives real Modbus frequency output
+- after full stop, manual profile can be restored by parameter writes only
+- local selector and local potentiometer work again after the return to manual
+
 ## Open Questions
 
 The following are still open and must not be treated as settled truth yet:
@@ -860,7 +915,7 @@ The following are still open and must not be treated as settled truth yet:
 - whether `DI20/24` can ever reproduce the direct communication baseline without explicit `F0-00 = 2`, `F0-01 = 8`
 - whether there is another required gate parameter near the source-selection group
 - whether vendor internal PLC/runtime logic can switch full profiles from DI state
-- whether a controller-driven full-profile switch is the practical final solution
+- whether a controller-driven full-profile switch is the final practical solution
 - the final host-side CLI for `pump_vfd_debug`
 - OTA update support
 - `mDNS` hostname publication
@@ -912,6 +967,11 @@ Purpose:
   - manual profile
   - direct communication profile
 
+Status:
+
+- this family is now confirmed as working in principle
+- remaining work is not proof-of-possibility, but integration design
+
 Candidate profiles:
 
 - manual:
@@ -920,6 +980,15 @@ Candidate profiles:
 - auto:
   - `F0-00 = 2`
   - `F0-01 = 8`
+
+Next questions for this family:
+
+- who owns the rewrite:
+  - ESP debug / future pump node
+  - bridge / host
+  - vendor runtime logic inside the drive
+- what safety handshake is required before applying the profile change
+- how to guarantee fail-safe return to manual if upstream control disappears
 
 ### Family D - Vendor runtime logic / PLC family
 
