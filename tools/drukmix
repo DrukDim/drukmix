@@ -310,6 +310,20 @@ bridge_flash_candidates() {
   fi
 }
 
+serial_flash_candidates() {
+  local out=()
+  local path
+
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    out+=("$path")
+  done < <(ls /dev/ttyACM* /dev/ttyUSB* 2>/dev/null || true)
+
+  if [[ ${#out[@]} -gt 0 ]]; then
+    printf '%s\n' "${out[@]}" | awk '!seen[$0]++'
+  fi
+}
+
 select_bridge_flash_port() {
   local requested="${1:-}"
   if [[ -n "$requested" ]]; then
@@ -337,16 +351,48 @@ select_bridge_flash_port() {
 }
 
 bridge_artifacts_ready() {
-  local dir="$REPO_DIR/firmware/releases/bridge"
+  artifacts_ready_for bridge
+}
+
+artifacts_ready_for() {
+  local app="$1"
+  local dir="$REPO_DIR/firmware/releases/$app"
   local missing=0
   local file
   for file in bootloader.bin partitions.bin boot_app0.bin firmware.bin; do
     if [[ ! -f "$dir/$file" ]]; then
-      print_missing "bridge artifact" "$dir/$file"
+      print_missing "$app artifact" "$dir/$file"
       missing=1
     fi
   done
   [[ $missing -eq 0 ]]
+}
+
+select_serial_flash_port() {
+  local target="$1"
+  local requested="${2:-}"
+  if [[ -n "$requested" ]]; then
+    if [[ -e "$requested" ]]; then
+      printf '%s' "$requested"
+      return 0
+    fi
+    echo "Flash port not found for $target: $requested" >&2
+    return 1
+  fi
+
+  mapfile -t candidates < <(serial_flash_candidates)
+  if [[ ${#candidates[@]} -eq 0 ]]; then
+    echo "No serial flash candidate detected for $target." >&2
+    echo "Connect the target ESP serial adapter or pass a port explicitly." >&2
+    return 1
+  fi
+  if [[ ${#candidates[@]} -gt 1 ]]; then
+    echo "Multiple serial flash candidates detected for $target:" >&2
+    printf '  %s\n' "${candidates[@]}" >&2
+    echo "Pass the intended port explicitly: drukmix flash $target <port>" >&2
+    return 1
+  fi
+  printf '%s' "${candidates[0]}"
 }
 
 moonraker_write_update_manager() {
@@ -676,8 +722,8 @@ Usage:
   drukmix install <profile>
   drukmix uninstall
   drukmix flash bridge [port]
-  drukmix flash tpl           (not implemented yet)
-  drukmix flash vfd           (not implemented yet)
+  drukmix flash tpl [port]
+  drukmix flash vfd [port]
 
 Profiles:
   main
@@ -913,8 +959,10 @@ cmd_uninstall() {
   print_ok "state" "DrukMix uninstall completed"
 }
 
-cmd_flash_bridge() {
-  local requested_port="${1:-}"
+cmd_flash_app() {
+  local app="$1"
+  local target="$2"
+  local requested_port="${3:-}"
   local port
 
   print_step "Preflight"
@@ -925,32 +973,53 @@ cmd_flash_bridge() {
     echo "Flash helper not found: $FLASH_HELPER"
     exit 2
   fi
-  if ! bridge_artifacts_ready; then
-    echo "Bridge release artifacts are incomplete."
+  if ! artifacts_ready_for "$app"; then
+    echo "Release artifacts are incomplete for $app."
     exit 2
   fi
-  port="$(select_bridge_flash_port "$requested_port")" || exit 2
-  print_ok "bridge port" "$port"
+  if [[ "$app" == "bridge" ]]; then
+    port="$(select_bridge_flash_port "$requested_port")" || exit 2
+  else
+    port="$(select_serial_flash_port "$target" "$requested_port")" || exit 2
+  fi
+  print_ok "$target port" "$port"
 
   print_step "Flashing"
-  "$FLASH_HELPER" bridge "$port"
+  "$FLASH_HELPER" "$app" "$port"
 
-  print_step "Host Integration"
-  install_bridge_udev_rule
-  reload_udev_rules
-  sleep 2
+  if [[ "$app" == "bridge" ]]; then
+    print_step "Host Integration"
+    install_bridge_udev_rule
+    reload_udev_rules
+    sleep 2
 
-  print_header "Summary"
-  if bridge_alias_exists; then
-    print_ok "bridge alias" "$BRIDGE_ALIAS"
+    print_header "Summary"
+    if bridge_alias_exists; then
+      print_ok "bridge alias" "$BRIDGE_ALIAS"
+    else
+      print_warn "bridge alias" "missing after flash"
+    fi
+    if bridge_usb_visible; then
+      print_ok "bridge usb" "visible in /dev/serial/by-id"
+    else
+      print_warn "bridge usb" "not detected after flash"
+    fi
   else
-    print_warn "bridge alias" "missing after flash"
+    print_header "Summary"
+    print_ok "$target flash" "completed on $port"
   fi
-  if bridge_usb_visible; then
-    print_ok "bridge usb" "visible in /dev/serial/by-id"
-  else
-    print_warn "bridge usb" "not detected after flash"
-  fi
+}
+
+cmd_flash_bridge() {
+  cmd_flash_app bridge bridge "${1:-}"
+}
+
+cmd_flash_vfd() {
+  cmd_flash_app pump_vfd vfd "${1:-}"
+}
+
+cmd_flash_tpl() {
+  cmd_flash_app pump_tpl tpl "${1:-}"
 }
 
 cmd="${1:-help}"
@@ -972,8 +1041,14 @@ case "$cmd" in
       bridge)
         cmd_flash_bridge "${3:-}"
         ;;
-      tpl|vfd|"")
-        echo "Not implemented yet: flash ${2:-}"
+      tpl)
+        cmd_flash_tpl "${3:-}"
+        ;;
+      vfd)
+        cmd_flash_vfd "${3:-}"
+        ;;
+      "")
+        echo "Usage: drukmix flash <bridge|vfd|tpl> [port]"
         exit 2
         ;;
       *)

@@ -223,8 +223,8 @@ Current known limitations include:
 - the currently deployed live path is `pumpvfd`, even though the architecture is intended to remain multi-backend;
 - telemetry semantics are still being cleaned up to better separate requested, delivered, backend-reported, and real physical state;
 - bridge USB identity is still generic at the base USB-device level and currently depends on udev aliasing for stable attachment;
-- flashing and first-install provisioning of blank bridge/pump devices is not yet a finished canonical CLI workflow;
-- `install` / `flash bridge` / `flash vfd` / `flash tpl` are still being split into clearer lifecycle stages;
+- flashing now has canonical CLI entrypoints, but first-install provisioning still expects an explicit port when multiple serial devices are present;
+- install / flash lifecycle staging is working but still being cleaned up into clearer operator-facing phases;
 - planned-motion feedforward is still experimental research and not yet a canonicalized host-control path.
 - the canonical variability model is now defined, but it still needs validation against additional clean installs and additional machine bring-up scenarios before a final profile/folder layout is frozen.
 
