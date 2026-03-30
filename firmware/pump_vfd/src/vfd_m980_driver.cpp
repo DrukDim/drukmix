@@ -11,6 +11,7 @@ static constexpr uint16_t REG_FAULT_CODE  = 0x1001;
 static constexpr uint16_t REG_RUN_FREQ    = 0x1003;
 static constexpr uint16_t REG_RUN_SPEED   = 0x1004;
 static constexpr uint16_t REG_OUT_CURRENT = 0x1006;
+static constexpr uint16_t REG_DI_STATE    = 0x100B;
 
 void VfdM980Driver::begin() {
   modbus_.begin();
@@ -40,16 +41,17 @@ bool VfdM980Driver::set_frequency_pct_x100(uint16_t value) {
 bool VfdM980Driver::poll_status(VfdStatus* st) {
   if (!st) return false;
 
-  // Read one contiguous block: 0x1000..0x1006
+  // Read one contiguous block: 0x1000..0x100B
   // Used registers:
   // 0 -> 0x1000 RUN_STATE
   // 1 -> 0x1001 FAULT_CODE
   // 3 -> 0x1003 RUN_FREQ
   // 4 -> 0x1004 RUN_SPEED
   // 6 -> 0x1006 OUT_CURRENT
-  uint16_t regs[7] = {0};
+  // 11 -> 0x100B DI_STATE
+  uint16_t regs[12] = {0};
 
-  if (!modbus_.read_holding_registers(MODBUS_SLAVE_ID, REG_RUN_STATE, 7, regs)) return false;
+  if (!modbus_.read_holding_registers(MODBUS_SLAVE_ID, REG_RUN_STATE, 12, regs)) return false;
 
   st->online = true;
   st->running = (regs[3] > 0) || ((int16_t)regs[4] != 0) || (regs[6] > 0);
@@ -57,6 +59,7 @@ bool VfdM980Driver::poll_status(VfdStatus* st) {
   st->actual_freq_x10 = (int16_t)regs[3];
   st->actual_speed_raw = (int16_t)regs[4];
   st->output_current_x10 = regs[6];
+  st->di_state = regs[REG_DI_STATE - REG_RUN_STATE];
   return true;
 }
 

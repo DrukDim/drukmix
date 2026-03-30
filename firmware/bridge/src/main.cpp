@@ -114,6 +114,7 @@ static void usb_send_status(uint16_t seq_reply) {
   st.pump_max_milli_lpm = g_pump_max_milli_lpm;
 
   st.pump_state = g_now_state.pump_state;
+  st.pump_mode = g_now_state.pump_mode;
   st.pump_fault_code = g_now_state.pump_fault_code;
   st.pump_online = g_now_state.pump_online;
   st.pump_running = g_now_state.pump_running;

@@ -190,6 +190,7 @@ void DmBusPumpLink::send_status(
     uint16_t src_node,
     uint16_t dst_node,
     uint8_t device_class,
+    uint16_t mode,
     bool online,
     bool running,
     uint16_t fault_code,
@@ -212,7 +213,7 @@ void DmBusPumpLink::send_status(
 
   f.p.c.uptime_ms = millis();
   f.p.c.state = fault_code ? dmbus::STATE_FAULT : (running ? dmbus::STATE_RUNNING : dmbus::STATE_READY);
-  f.p.c.mode = dmbus::MODE_REMOTE;
+  f.p.c.mode = mode;
   f.p.c.warn_flags = 0;
   f.p.c.fault_code = fault_code;
   f.p.c.online = online ? 1 : 0;

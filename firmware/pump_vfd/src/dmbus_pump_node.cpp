@@ -12,6 +12,7 @@ void PumpVfdNode::begin() {
   status_.running = false;
   status_.faulted = false;
   status_.fault_code = 0;
+  status_.mode = dmbus::MODE_UNKNOWN;
   status_.target_milli_lpm = 0;
   status_.actual_milli_lpm = 0;
   status_.max_milli_lpm = max_milli_lpm_;
@@ -111,10 +112,12 @@ void PumpVfdNode::update() {
       status_.fault_code = st.fault_code;
       status_.faulted = (st.fault_code != 0);
       status_.running = status_.faulted ? false : st.running;
+      status_.mode = derive_mode_(st.di_state);
       status_.actual_milli_lpm = 0;
     } else {
       status_.online = false;
       status_.running = false;
+      status_.mode = dmbus::MODE_UNKNOWN;
       status_.actual_milli_lpm = 0;
     }
 
@@ -124,6 +127,7 @@ void PumpVfdNode::update() {
         NODE_ID_PUMP_VFD,
         0x0001,
         DEVICE_CLASS_PUMP,
+        status_.mode,
         status_.online,
         status_.running,
         status_.fault_code,
@@ -134,6 +138,8 @@ void PumpVfdNode::update() {
 
     Serial.print("VFD online=");
     Serial.print(status_.online);
+    Serial.print(" mode=");
+    Serial.print(status_.mode);
     Serial.print(" running=");
     Serial.print(status_.running);
     Serial.print(" fault=");
@@ -149,7 +155,9 @@ void PumpVfdNode::update() {
     Serial.print(" vfd_speed_raw=");
     Serial.print(st.actual_speed_raw);
     Serial.print(" vfd_current_x10=");
-    Serial.println(st.output_current_x10);
+    Serial.print(st.output_current_x10);
+    Serial.print(" di_state=");
+    Serial.println(st.di_state);
   }
 
   delay(2);
@@ -173,9 +181,11 @@ bool PumpVfdNode::set_flow_direction_(int32_t target_milli_lpm, bool rev) {
     status_.fault_code = st.fault_code;
     status_.faulted = (st.fault_code != 0);
     status_.running = status_.faulted ? false : st.running;
+    status_.mode = derive_mode_(st.di_state);
   } else {
     status_.online = false;
     status_.running = false;
+    status_.mode = dmbus::MODE_UNKNOWN;
     return false;
   }
 
@@ -226,11 +236,13 @@ bool PumpVfdNode::reset_fault() {
       status_.fault_code = st.fault_code;
       status_.faulted = (st.fault_code != 0);
       status_.running = status_.faulted ? false : st.running;
+      status_.mode = derive_mode_(st.di_state);
       return true;
     }
 
     status_.online = false;
     status_.running = false;
+    status_.mode = dmbus::MODE_UNKNOWN;
     return false;
   };
 
@@ -261,8 +273,13 @@ bool PumpVfdNode::get_status(PumpNodeStatus* st) {
 
 
 bool PumpVfdNode::is_manual_mode_active_() const {
-  // TODO: replace with real selector / local-mode input
-  return false;
+  return status_.mode == dmbus::MODE_LOCAL;
+}
+
+uint16_t PumpVfdNode::derive_mode_(uint16_t di_state) const {
+  bool auto_selected = (di_state & MODE_SWITCH_DI_MASK) != 0;
+  if (!MODE_SWITCH_MASK_SET_IS_AUTO) auto_selected = !auto_selected;
+  return auto_selected ? dmbus::MODE_AUTO : dmbus::MODE_LOCAL;
 }
 
 uint16_t PumpVfdNode::compose_pump_flags_() const {
@@ -272,8 +289,10 @@ uint16_t PumpVfdNode::compose_pump_flags_() const {
   if (status_.target_milli_lpm > 0) {
     flags |= rev_commanded_ ? dmbus::PUMP_FLAG_REVERSE : dmbus::PUMP_FLAG_FORWARD;
   }
-  if (is_manual_mode_active_()) flags |= dmbus::PUMP_FLAG_MANUAL_MODE;
-  else flags |= dmbus::PUMP_FLAG_REMOTE_MODE;
+  if (status_.mode == dmbus::MODE_LOCAL) flags |= dmbus::PUMP_FLAG_MANUAL_MODE;
+  else if (status_.mode == dmbus::MODE_AUTO || status_.mode == dmbus::MODE_REMOTE) {
+    flags |= dmbus::PUMP_FLAG_REMOTE_MODE;
+  }
   if (status_.online) flags |= dmbus::PUMP_FLAG_HW_READY;
   if (status_.faulted) flags |= dmbus::PUMP_FLAG_FAULT_LATCHED;
 

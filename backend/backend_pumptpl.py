@@ -61,4 +61,5 @@ class PumpTplBackend(PumpBackend):
             target_pct=self._last_target_pct,
             telemetry_ok=False,
             age_ms=raw.get("age_ms"),
+            pump_mode=int(raw.get("pump_mode", -1)),
         )

@@ -47,6 +47,7 @@ void UsbLink::send_status(uint8_t proto, uint16_t seq_reply, const UsbStatusPayl
   *(int32_t*)(payload + off) = st.pump_max_milli_lpm; off += 4;
 
   *(uint16_t*)(payload + off) = st.pump_state; off += 2;
+  *(uint16_t*)(payload + off) = st.pump_mode; off += 2;
   *(uint16_t*)(payload + off) = st.pump_fault_code; off += 2;
   payload[off++] = st.pump_online ? 1 : 0;
   payload[off++] = st.pump_running ? 1 : 0;

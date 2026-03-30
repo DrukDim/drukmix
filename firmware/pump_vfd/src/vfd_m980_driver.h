@@ -9,6 +9,7 @@ struct VfdStatus {
   int16_t actual_freq_x10 = 0;
   int16_t actual_speed_raw = 0;
   uint16_t output_current_x10 = 0;
+  uint16_t di_state = 0;
 };
 
 class VfdM980Driver {

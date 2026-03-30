@@ -14,6 +14,12 @@ USB_SET_MAXLPM = 3
 USB_RESET_FAULT = 4
 USB_BRIDGE_STATUS = 101
 
+MODE_UNKNOWN = 0
+MODE_LOCAL = 1
+MODE_REMOTE = 2
+MODE_AUTO = 3
+MODE_SERVICE = 4
+
 PUMP_FLAG_RUNNING = 1 << 0
 PUMP_FLAG_FORWARD = 1 << 1
 PUMP_FLAG_REVERSE = 1 << 2
@@ -170,7 +176,7 @@ class BridgeUsbTransport:
             return None
 
         body = memoryview(pkt)[8:]
-        if len(body) < 31:
+        if len(body) < 38:
             return None
 
         off = 0
@@ -193,6 +199,8 @@ class BridgeUsbTransport:
 
         pump_state = struct.unpack_from("<H", body, off)[0]
         off += 2
+        pump_mode = struct.unpack_from("<H", body, off)[0]
+        off += 2
         pump_fault_code = struct.unpack_from("<H", body, off)[0]
         off += 2
         pump_online = bool(body[off])
@@ -207,15 +215,24 @@ class BridgeUsbTransport:
         pump_flags = struct.unpack_from("<H", body, off)[0]
         off += 2
 
-        return {
-            "link_ok": pump_link,
-            "control_mode": (
+        if pump_mode == MODE_LOCAL:
+            control_mode = "MANUAL"
+        elif pump_mode in (MODE_REMOTE, MODE_AUTO):
+            control_mode = "AUTO"
+        elif pump_mode == MODE_SERVICE:
+            control_mode = "SERVICE"
+        else:
+            control_mode = (
                 "MANUAL"
                 if (pump_flags & PUMP_FLAG_MANUAL_MODE)
                 else "AUTO"
                 if (pump_flags & PUMP_FLAG_REMOTE_MODE)
                 else "UNKNOWN"
-            ),
+            )
+
+        return {
+            "link_ok": pump_link,
+            "control_mode": control_mode,
             "running": pump_running,
             "rev_active": (
                 True
@@ -228,6 +245,7 @@ class BridgeUsbTransport:
             "fault_code": pump_fault_code,
             "age_ms": int(last_seen_div10) * 10,
             "pump_state": pump_state,
+            "pump_mode": pump_mode,
             "pump_online": pump_online,
             "target_milli_lpm": target_milli_lpm,
             "hw_setpoint_raw": hw_setpoint_raw,

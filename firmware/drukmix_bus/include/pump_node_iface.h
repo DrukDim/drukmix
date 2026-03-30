@@ -6,6 +6,7 @@ struct PumpNodeStatus {
   bool running = false;
   bool faulted = false;
   uint16_t fault_code = 0;
+  uint16_t mode = 0;
 
   int32_t target_milli_lpm = 0;
   int32_t actual_milli_lpm = 0;

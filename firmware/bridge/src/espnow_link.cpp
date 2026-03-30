@@ -203,6 +203,7 @@ void espnow_on_recv(
     const auto* s = reinterpret_cast<const FramePumpStatus*>(data);
 
     st->pump_state = s->p.c.state;
+    st->pump_mode = s->p.c.mode;
     st->pump_fault_code = s->p.c.fault_code;
     st->pump_online = (s->p.c.online != 0);
     st->pump_running = (s->p.pump_flags & dmbus::PUMP_FLAG_RUNNING) != 0;

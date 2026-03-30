@@ -121,6 +121,7 @@ class FakeBridgeTransport:
         st = {
             "link_ok": self.model.link_ok,
             "control_mode": "AUTO",
+            "pump_mode": 3,
             "running": bool(running),
             "rev_active": bool(self.model.rev),
             "faulted": False,

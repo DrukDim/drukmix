@@ -16,6 +16,7 @@ struct EspNowState {
   uint16_t send_fail_count = 0;
 
   uint16_t pump_state = 0;
+  uint16_t pump_mode = 0;
   uint16_t pump_fault_code = 0;
   bool     pump_online = false;
   bool     pump_running = false;

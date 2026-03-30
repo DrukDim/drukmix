@@ -16,3 +16,9 @@ static constexpr int UART_TX_PIN = 17;
 static constexpr int UART_RTS_PIN = 4;   // DE/RE if used
 
 static constexpr uint8_t MODBUS_SLAVE_ID = 1;
+
+// Physical AUTO/MANUAL button truth proven on the current M980 integration:
+// the DI3 line state is visible in U0-11 as bit 2 (mask 0x0004), and a set bit
+// means AUTO is selected while a cleared bit means MANUAL.
+static constexpr uint16_t MODE_SWITCH_DI_MASK = 0x0004;
+static constexpr bool MODE_SWITCH_MASK_SET_IS_AUTO = true;

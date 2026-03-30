@@ -25,6 +25,7 @@ private:
   PumpNodeStatus status_{};
 
   bool is_manual_mode_active_() const;
+  uint16_t derive_mode_(uint16_t di_state) const;
   uint16_t compose_pump_flags_() const;
   void handle_rx_();
   bool set_flow_direction_(int32_t target_milli_lpm, bool rev);

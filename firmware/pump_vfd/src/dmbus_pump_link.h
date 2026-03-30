@@ -34,6 +34,7 @@ public:
       uint16_t src_node,
       uint16_t dst_node,
       uint8_t device_class,
+      uint16_t mode,
       bool online,
       bool running,
       uint16_t fault_code,
