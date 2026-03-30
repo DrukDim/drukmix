@@ -50,9 +50,26 @@ resolve_esptool_python() {
 }
 
 ESPTOOL_PY="$(resolve_esptool_python)"
+declare -a baud_candidates=()
+baud_candidates+=("$BAUD")
+for fallback in 460800 230400 115200; do
+  if [[ "$fallback" != "$BAUD" ]]; then
+    baud_candidates+=("$fallback")
+  fi
+done
 
-"$ESPTOOL_PY" -m esptool --chip esp32 --port "$PORT" --baud "$BAUD" write_flash -z \
-  0x1000 "$DIR/bootloader.bin" \
-  0x8000 "$DIR/partitions.bin" \
-  0xe000 "$DIR/boot_app0.bin" \
-  0x10000 "$DIR/firmware.bin"
+last_rc=0
+for try_baud in "${baud_candidates[@]}"; do
+  echo "Flashing $APP on $PORT at $try_baud baud"
+  if "$ESPTOOL_PY" -m esptool --chip esp32 --port "$PORT" --baud "$try_baud" write_flash -z \
+    0x1000 "$DIR/bootloader.bin" \
+    0x8000 "$DIR/partitions.bin" \
+    0xe000 "$DIR/boot_app0.bin" \
+    0x10000 "$DIR/firmware.bin"; then
+    exit 0
+  fi
+  last_rc=$?
+  echo "Flash failed at $try_baud baud, trying lower speed..." >&2
+done
+
+exit "$last_rc"
