@@ -47,6 +47,7 @@ struct FramePumpStatus {
 void DmBusPumpLink::begin(uint8_t proto) {
   proto_ = proto;
   self_ = this;
+  ensure_broadcast_peer_();
   esp_now_register_recv_cb(on_recv_thunk_);
 }
 
@@ -84,6 +85,21 @@ void DmBusPumpLink::ensure_peer_(const uint8_t mac[6]) {
     p.ifidx = WIFI_IF_STA;
     esp_now_add_peer(&p);
   }
+}
+
+void DmBusPumpLink::ensure_broadcast_peer_() {
+  if (broadcast_peer_ready_) return;
+
+  const uint8_t bcast[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+  if (!esp_now_is_peer_exist(bcast)) {
+    esp_now_peer_info_t p{};
+    memcpy(p.peer_addr, bcast, 6);
+    p.channel = 0;
+    p.encrypt = false;
+    p.ifidx = WIFI_IF_STA;
+    esp_now_add_peer(&p);
+  }
+  broadcast_peer_ready_ = true;
 }
 
 void DmBusPumpLink::on_recv_thunk_(const uint8_t* mac_addr, const uint8_t* data, int len) {
@@ -197,9 +213,14 @@ void DmBusPumpLink::send_status(
     int32_t target_milli_lpm,
     int32_t max_milli_lpm,
     int32_t cmd_setpoint_raw,
-    uint16_t pump_flags) {
+  uint16_t pump_flags) {
 
-  if (!peer_known_) return;
+  const uint8_t* dst_mac = peer_known_ ? peer_mac_ : nullptr;
+  if (!dst_mac) {
+    ensure_broadcast_peer_();
+    static const uint8_t bcast[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+    dst_mac = bcast;
+  }
 
   FramePumpStatus f{};
   f.h.proto_ver = proto;
@@ -227,5 +248,5 @@ void DmBusPumpLink::send_status(
   f.p.pump_flags = pump_flags;
 
   f.crc.crc16 = dmbus::frame_crc((const uint8_t*)&f, sizeof(f) - sizeof(f.crc));
-  esp_now_send(peer_mac_, (const uint8_t*)&f, sizeof(f));
+  esp_now_send(dst_mac, (const uint8_t*)&f, sizeof(f));
 }

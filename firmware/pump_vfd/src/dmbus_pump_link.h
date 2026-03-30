@@ -47,11 +47,13 @@ private:
   static void on_recv_thunk_(const uint8_t* mac_addr, const uint8_t* data, int len);
   void on_recv_(const uint8_t* mac_addr, const uint8_t* data, int len);
   void ensure_peer_(const uint8_t mac[6]);
+  void ensure_broadcast_peer_();
 
   static DmBusPumpLink* self_;
 
   bool peer_known_ = false;
   uint8_t peer_mac_[6] = {0};
+  bool broadcast_peer_ready_ = false;
 
   volatile bool reset_pending_ = false;
   PumpRxCmd reset_rx_{};
