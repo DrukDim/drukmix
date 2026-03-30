@@ -271,6 +271,58 @@ Important:
 - `F0-18` is not the same thing as full command/reference channel selection
 - current field work shows that treating `F0-18` as the only solution path is unsafe
 
+### `F0-18` detail
+
+Current best interpretation is that `F0-18` is a three-digit binding code shown on the panel as a zero-padded four-character field.
+
+Current structure:
+
+- ones digit = panel-command binding frequency source
+- tens digit = terminal-command binding frequency source
+- hundreds digit = communication-command binding frequency source
+
+Current manual-derived digit map:
+
+- `0` = no binding
+- `1` = panel up/down key source
+- `2` = panel potentiometer
+- `3` = `AI1`
+- `4` = reserved
+- `5` = multi-step / multi-speed
+- `6` = `PLC`
+- `7` = constant-pressure / water-supply PID
+- `8` = general PID
+- `9` = communication setting
+
+Important:
+
+- this digit map must not be casually conflated with the `F0-01` / `F0-02` source list shown on the live panel
+- current field work already showed that `F0-01` / `F0-02` semantics and `F0-18` digit semantics must be treated as related but not assumed identical
+
+Current panel-format rule:
+
+- the panel displays values like `0020`, `0800`, `0820`, `0900`, `0920`
+- Modbus readback at `0xF012` returns the same values as plain integers:
+  - `20`
+  - `800`
+  - `820`
+  - `900`
+  - `920`
+
+Current field conclusion about the fourth displayed digit:
+
+- there is no confirmed evidence that the leading displayed zero is a fourth semantic binding digit
+- current evidence supports treating it as fixed-width zero padding
+- this is still a field conclusion, not a vendor-proven formal rule
+
+Current field conclusion about practical effect:
+
+- `F0-18` does affect behavior
+- but across the tested values above it has not yet restored the required hybrid manual mode:
+  - built-in selector works
+  - built-in potentiometer works
+- for this use case, `F0-18` must currently be treated as a modifier, not as a proven full solution
+
 ### 4. Terminal logic
 
 Primary objects:
@@ -724,6 +776,17 @@ Confirmed live effect:
 - it does not break the clean manual baseline
 - but with `DI3 = 20` only, it still does not produce a working communication frequency output
 
+### `F0-18 = 0800` or `0820` as the main solution
+
+Rejected / not sufficient.
+
+Confirmed live effect on auto-first tests:
+
+- built-in selector works after `DI3 = 20`
+- built-in potentiometer still does not work
+
+That means these values also fail to restore the required hybrid manual mode.
+
 ### `DI3 = 20` alone is enough
 
 Rejected.
@@ -908,6 +971,89 @@ Result:
 - after full stop, manual profile can be restored by parameter writes only
 - local selector and local potentiometer work again after the return to manual
 
+### T012 - `panel-manual` split proof
+
+Parameters:
+
+- `F0-00 = 0`
+- `F0-01 = 1`
+- `F0-02 = 0`
+- `F0-03 = 0`
+- `F0-18 = 0`
+- `F1-02 = 0`
+- `F1-03 = 0`
+
+Result:
+
+- built-in potentiometer works
+- built-in selector does not work
+
+Meaning:
+
+- built-in potentiometer belongs to the panel-frequency side
+- built-in selector is not a pure panel-command control path
+
+### T013 - Auto-first single-DI binding series
+
+Base profile:
+
+- `F0-00 = 2`
+- `F0-01 = 8`
+- `F0-02 = 0`
+- `F0-03 = 0`
+- `F1-02 = 20`
+- `F1-03 = 0`
+- `DI3 active`
+
+Tested `F0-18` values:
+
+- `20`
+- `800`
+- `820`
+- `900`
+- `920`
+
+Result:
+
+- built-in selector works
+- built-in potentiometer does not work
+
+Meaning:
+
+- in the tested auto-first single-DI architecture, `F0-18` can influence command-side override behavior
+- but it has not restored the built-in potentiometer alongside the selector
+
+### T014 - Auto-first dual-source binding series
+
+Base profile:
+
+- `F0-00 = 2`
+- `F0-01 = 8`
+- `F0-02 = 1`
+- `F0-03 = 2`
+- `F1-02 = 20`
+- `F1-03 = 24`
+- `DI3 active`
+- `DI4 active`
+
+Tested `F0-18` values:
+
+- `0`
+- `800`
+- `820`
+- `900`
+- `920`
+
+Result:
+
+- built-in selector works
+- built-in potentiometer does not work
+
+Meaning:
+
+- even with explicit `DI24` frequency switching and a dual-source profile,
+- the tested `F0-18` variants did not restore the required hybrid manual mode
+
 ## Open Questions
 
 The following are still open and must not be treated as settled truth yet:
@@ -936,6 +1082,15 @@ Rules:
 - always test against a known clean manual baseline first
 - vary `F0-18` together with a clearly declared `F0-00..F0-03` profile
 - record whether manual selector, manual pot, Modbus run, and Modbus frequency each work
+
+Current narrowed focus inside this family:
+
+- do not keep re-testing `20 / 800 / 820 / 900 / 920` in the already-covered base profiles above
+- if binding-family testing continues, it should target genuinely new combinations such as:
+  - different terminal binding digit candidates
+  - different communication binding digit candidates
+  - different declared `F0-00..F0-03` source architectures
+- every new test must state exactly which family/profile it belongs to
 
 ### Family B - Explicit DI family
 
@@ -989,6 +1144,12 @@ Next questions for this family:
   - vendor runtime logic inside the drive
 - what safety handshake is required before applying the profile change
 - how to guarantee fail-safe return to manual if upstream control disappears
+
+Constraint:
+
+- this family is not currently acceptable as the final operator-fallback solution by itself
+- a dead ESP / dead upstream controller is a real field condition
+- the final production solution must still provide a physical path back to safe manual control without menu editing
 
 ### Family D - Vendor runtime logic / PLC family
 
