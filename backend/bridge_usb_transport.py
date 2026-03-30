@@ -99,7 +99,19 @@ class BridgeUsbTransport:
         self._last_status_monotonic: float = 0.0
 
     def open(self):
-        self.ser = serial.Serial(self.port, self.baud, timeout=0.02)
+        ser = serial.Serial()
+        ser.port = self.port
+        ser.baudrate = self.baud
+        ser.timeout = 0.02
+        # ESP32 bridge boards can reset or emit ROM boot noise if DTR/RTS
+        # are asserted during a normal runtime open.
+        ser.dtr = False
+        ser.rts = False
+        ser.open()
+        time.sleep(0.15)
+        ser.reset_input_buffer()
+        ser.reset_output_buffer()
+        self.ser = ser
         self.rxbuf.clear()
 
     def close(self):
@@ -176,7 +188,7 @@ class BridgeUsbTransport:
             return None
 
         body = memoryview(pkt)[8:]
-        if len(body) < 38:
+        if len(body) < 36:
             return None
 
         off = 0
@@ -209,11 +221,14 @@ class BridgeUsbTransport:
         off += 1
         target_milli_lpm = struct.unpack_from("<i", body, off)[0]
         off += 4
-        off += 4  # reserved actual_milli_lpm field from bridge payload; ignored on host
+        off += 4  # actual_milli_lpm field from bridge payload; ignored on host
         hw_setpoint_raw = struct.unpack_from("<i", body, off)[0]
         off += 4
-        pump_flags = struct.unpack_from("<H", body, off)[0]
-        off += 2
+        pump_flags = (
+            struct.unpack_from("<H", body, off)[0] if len(body) >= (off + 2) else 0
+        )
+        if len(body) >= (off + 2):
+            off += 2
 
         if pump_mode == MODE_LOCAL:
             control_mode = "MANUAL"
@@ -263,6 +278,7 @@ class BridgeUsbTransport:
     def _request_status(self) -> Optional[dict]:
         req_seq = self._send_packet(USB_PING, b"")
         deadline = time.monotonic() + 0.30
+        fallback_status: Optional[dict] = None
         while time.monotonic() < deadline:
             pkt = self._poll_packet()
             if not pkt:
@@ -273,10 +289,12 @@ class BridgeUsbTransport:
 
             self._last_status = st
             self._last_status_monotonic = time.monotonic()
+            if fallback_status is None:
+                fallback_status = st
 
             if st.get("seq_reply") == req_seq:
                 return st
-        return None
+        return fallback_status
 
     def invalidate_status_cache(self):
         self._last_status = None
