@@ -12,12 +12,46 @@ fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIR="$ROOT/firmware/releases/$APP"
+VENV_PY="$ROOT/.venv/bin/python"
 
 for f in bootloader.bin partitions.bin boot_app0.bin firmware.bin; do
   [[ -f "$DIR/$f" ]] || { echo "missing $DIR/$f"; exit 2; }
 done
 
-python3 -m esptool --chip esp32 --port "$PORT" --baud "$BAUD" write_flash -z \
+python_has_module() {
+  local py="$1"
+  "$py" - <<'PY' >/dev/null 2>&1
+import importlib.util
+import sys
+sys.exit(0 if importlib.util.find_spec("esptool") else 1)
+PY
+}
+
+resolve_esptool_python() {
+  if python_has_module python3; then
+    printf '%s\n' python3
+    return 0
+  fi
+
+  if [[ -x "$VENV_PY" ]]; then
+    if ! python_has_module "$VENV_PY"; then
+      echo "Installing esptool into repo venv: $VENV_PY" >&2
+      "$VENV_PY" -m pip install esptool >&2
+    fi
+    if python_has_module "$VENV_PY"; then
+      printf '%s\n' "$VENV_PY"
+      return 0
+    fi
+  fi
+
+  echo "No Python interpreter with esptool available." >&2
+  echo "Run 'drukmix install <profile>' first, or install esptool for python3." >&2
+  return 1
+}
+
+ESPTOOL_PY="$(resolve_esptool_python)"
+
+"$ESPTOOL_PY" -m esptool --chip esp32 --port "$PORT" --baud "$BAUD" write_flash -z \
   0x1000 "$DIR/bootloader.bin" \
   0x8000 "$DIR/partitions.bin" \
   0xe000 "$DIR/boot_app0.bin" \
