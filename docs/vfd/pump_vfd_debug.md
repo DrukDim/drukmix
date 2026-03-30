@@ -1210,6 +1210,77 @@ Meaning:
 - auto-side delivered behavior tracks Modbus setpoint changes
 - this is currently the strongest confirmed operator-workflow candidate found in field tests
 
+### T018 - Low-active `DI3` fail-safe candidate
+
+Base profile:
+
+- `F0-00 = 2`
+- `F0-01 = 8`
+- `F0-02 = 0`
+- `F0-03 = 0`
+- `F0-18 = 10`
+- `F1-02 = 20`
+- `F1-03 = 0`
+- `F1-05 = 100`
+
+Fixed physical setup:
+
+- selector in `FWD`
+- built-in potentiometer near maximum
+- low Modbus setpoint used for contrast
+
+Observed sequence:
+
+- `A_open_stopped`
+  - `run_state = 1`
+  - `actual_freq = 268`
+  - `speed = 786`
+  - `current = 4`
+  - `di_state = 1`
+- `A_open_running`
+  - `run_state = 1`
+  - `actual_freq = 500`
+  - `speed = 1325`
+  - `current = 3`
+  - `di_state = 1`
+- `A_open_stopped_again`
+  - `run_state = 1`
+  - `actual_freq = 500`
+  - `speed = 1325`
+  - `current = 3`
+  - `di_state = 1`
+- `B_closed_stopped`
+  - `run_state = 1`
+  - `actual_freq = 231`
+  - `speed = 539`
+  - `current = 3`
+  - `di_state = 5`
+- `B_closed_running`
+  - `run_state = 1`
+  - `actual_freq = 25`
+  - `speed = 66`
+  - `current = 4`
+  - `di_state = 5`
+- `B_closed_stopped_again`
+  - `run_state = 3`
+  - `actual_freq = 0`
+  - `speed = 0`
+  - `current = 0`
+  - `di_state = 5`
+
+Meaning:
+
+- with `F1-05 = 100`, `DI3 open` behaves like a fail-safe manual state
+- with `F1-05 = 100`, `DI3 closed` behaves like an auto/Modbus-controlled state
+- current evidence is strong enough to treat this as the leading production candidate for:
+  - button OFF / wire break -> manual
+  - button ON / energized line -> auto
+
+Important:
+
+- the current proof was obtained through the existing relay-driven `DI3` path
+- final production wiring still needs to define the physical pull-up / pull-down implementation explicitly
+
 ## Open Questions
 
 The following are still open and must not be treated as settled truth yet:
