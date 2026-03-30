@@ -1281,6 +1281,49 @@ Important:
 - the current proof was obtained through the existing relay-driven `DI3` path
 - final production wiring still needs to define the physical pull-up / pull-down implementation explicitly
 
+### T019 - Physical `AUTO/MANUAL` button and separate `RUN` LED
+
+This superseded the earlier direct `24V -> DI3` jumper idea.
+
+Confirmed drive configuration:
+
+- `F0-00 = 2`
+- `F0-01 = 8`
+- `F0-02 = 0`
+- `F0-03 = 0`
+- `F0-18 = 10`
+- `F1-02 = 20`
+- `F1-03 = 0`
+- `F1-05 = 100`
+- `F1-08 = 1`
+
+Confirmed field behavior:
+
+- button released / open circuit on the mode line -> `MANUAL`
+- button pressed / illuminated -> `AUTO`
+- in `MANUAL`, the built-in selector and built-in potentiometer work
+- in `AUTO`, Modbus run and Modbus frequency control work
+- the separate LED on `T1A/T1B` now indicates `RUN`
+
+User-reported tested wiring:
+
+- `+24V` is routed to:
+  - the separate indicator LED supply
+  - the illuminated button LED supply
+- `COM` is routed to:
+  - `T1A`
+  - button contact `C`
+- `T1B` is routed to the separate indicator LED
+- button contact `NO` is routed to `DI3`
+- illuminated button LED terminal `1` is tied to the `NO` / `DI3` node
+- illuminated button LED terminal `2` is tied to `+24V`
+
+Meaning:
+
+- the confirmed working production candidate is the dry-contact button on `DI3` with the low-active configuration above
+- the illuminated button indicates `AUTO`
+- the separate LED on `T1A/T1B` indicates `RUN`
+
 ## Open Questions
 
 The following are still open and must not be treated as settled truth yet:
