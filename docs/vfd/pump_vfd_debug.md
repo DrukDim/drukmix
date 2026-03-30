@@ -155,8 +155,10 @@ Current confirmed live register access examples:
 - `0xF012 -> F0-18`
 - `0xF014 -> F0-20`
 - `0xF102 -> F1-02`
+- `0xF108 -> F1-08`
 - `0x1000 -> U0-00`
 - `0x100B -> U0-11`
+- `0x0003 -> relay/DO control register`
 
 ## Important M980 Register Mapping Finding
 
@@ -184,6 +186,35 @@ Interpretation:
 
 This finding is critical.
 Any future `M980` register work must be checked against this rule before new assumptions are added to code or docs.
+
+## Confirmed Relay1 Communication Control
+
+`M980` relay output `T1A-T1B` can be used as a Modbus-controlled dry contact.
+
+Current confirmed setup:
+
+- `F1-08 = 7`
+
+In this mode, relay1 is controlled through Modbus register:
+
+- `0x0003`
+
+Current confirmed behavior:
+
+- `write 0x0003 = 1` -> relay1 closes
+- `write 0x0003 = 0` -> relay1 opens
+
+In the current field setup, `T1A-T1B` is wired into the `DI3` path.
+
+This has already been confirmed live:
+
+- `0x0003 = 1` -> `U0-11 = 4`
+- `0x0003 = 0` -> `U0-11 = 0`
+
+That means `pump_vfd_debug` can now switch the `DI3` path programmatically without manual shorting.
+
+This is not just a manual-theory note.
+It is a verified live hardware capability and should be considered available for future relay-driven tests and integration experiments.
 
 ## Current Supported API
 
@@ -406,6 +437,9 @@ The following have already been confirmed on a live machine during bring-up:
 - `F0-18` can be read correctly at `0xF012`
 - `F0-20` can be read correctly at `0xF014`
 - `F1-02` can be read and written at `0xF102`
+- `F1-08` can be read and written at `0xF108`
+- `relay1` can be switched by writing `0x0003`
+- `T1A-T1B` can be used to drive the current `DI3` path from Modbus control
 
 ## Confirmed Mode Pairing So Far
 
