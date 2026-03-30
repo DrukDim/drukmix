@@ -108,7 +108,10 @@ class BridgeUsbTransport:
         ser.dtr = False
         ser.rts = False
         ser.open()
-        time.sleep(0.15)
+        # On current ESP32+CP2102 bridge boards, a host-side serial open can
+        # reset the bridge MCU. Give it enough time to boot and flush its ROM
+        # boot chatter before first protocol traffic.
+        time.sleep(0.50)
         ser.reset_input_buffer()
         ser.reset_output_buffer()
         self.ser = ser
