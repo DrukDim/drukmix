@@ -202,6 +202,30 @@ Related areas:
 - pump-node provisioning
 - install workflow
 
+### 8a. CP2102 USB identity is not unique between bridge and pump provisioning devices
+
+Status: active provisioning and attachment constraint
+
+Current ESP provisioning devices use CP2102 USB-UART bridges that can present the same generic USB identity to Linux.
+
+Confirmed current finding:
+- relying on CP2102 generic serial identity such as `serial=0001` is not sufficient to distinguish bridge from pump programming adapters;
+- this can make `/dev/drukos-bridge` ambiguous if the alias is matched only by generic CP2102 identity;
+- a proper long-term fix likely requires an explicit CP2102 provisioning stage with unique programmed USB identity, rather than relying on ESP firmware flash alone.
+
+Implication:
+
+- bridge attachment and first-install provisioning must not assume CP2102 USB identity is globally unique out of the box;
+- any stable bridge alias strategy must either bind to an explicitly verified physical port or use a future canonical CP2102 identity-provisioning workflow;
+- USB identity provisioning is deferred work and must not be silently treated as already solved.
+
+Related areas:
+
+- bridge USB aliasing
+- first-install provisioning
+- CP2102 EEPROM / identity programming
+- `tools/drukmix`
+
 ### 9. Planner-authoritative pump control is validated as the intended direction, but migration is incomplete
 
 Status: active migration constraint
