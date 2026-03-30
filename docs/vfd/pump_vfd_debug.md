@@ -187,34 +187,107 @@ Interpretation:
 This finding is critical.
 Any future `M980` register work must be checked against this rule before new assumptions are added to code or docs.
 
-## Confirmed Relay1 Communication Control
+## Confirmed Relay Communication Control
 
-`M980` relay output `T1A-T1B` can be used as a Modbus-controlled dry contact.
+`M980` relay outputs `T1A-T1B` and `T2A-T2B` can be used as Modbus-controlled dry contacts.
 
 Current confirmed setup:
 
 - `F1-08 = 7`
+- `F1-09 = 7`
 
-In this mode, relay1 is controlled through Modbus register:
+In this mode, relay outputs are controlled through Modbus register:
 
 - `0x0003`
+
+Bit meaning confirmed in field:
+
+- bit `0` -> relay1
+- bit `1` -> relay2
 
 Current confirmed behavior:
 
 - `write 0x0003 = 1` -> relay1 closes
-- `write 0x0003 = 0` -> relay1 opens
+- `write 0x0003 = 2` -> relay2 closes
+- `write 0x0003 = 3` -> relay1 and relay2 close
+- `write 0x0003 = 0` -> relay1 and relay2 open
 
-In the current field setup, `T1A-T1B` is wired into the `DI3` path.
+Current field wiring:
+
+- `T1A-T1B` is wired into the `DI3` path
+- `T2A-T2B` is wired into the `DI4` path
 
 This has already been confirmed live:
 
 - `0x0003 = 1` -> `U0-11 = 4`
+- `0x0003 = 2` -> `U0-11 = 8`
+- `0x0003 = 3` -> `U0-11 = 12`
 - `0x0003 = 0` -> `U0-11 = 0`
 
-That means `pump_vfd_debug` can now switch the `DI3` path programmatically without manual shorting.
+That means `pump_vfd_debug` can now switch `DI3` and `DI4` programmatically without manual shorting.
 
-This is not just a manual-theory note.
-It is a verified live hardware capability and should be considered available for future relay-driven tests and integration experiments.
+This is a verified live hardware capability and should be considered available for future relay-driven tests and integration experiments.
+
+## Control-Model Picture
+
+The current M-Driver family picture must be treated as four separate layers, not one mode bit.
+
+### 1. Command source
+
+Primary objects:
+
+- `F0-00`
+- DI function `20`
+
+Meaning:
+
+- who owns run/stop/reverse authority
+
+### 2. Frequency source
+
+Primary objects:
+
+- `F0-01` main frequency source
+- `F0-02` auxiliary frequency source
+- `F0-03` logic between main and auxiliary source
+- DI function `24`
+
+Meaning:
+
+- who owns the effective target frequency
+
+### 3. Binding
+
+Primary object:
+
+- `F0-18`
+
+Meaning:
+
+- optional binding between panel / terminal / communication command channels and one frequency source
+
+Important:
+
+- `F0-18` is not the same thing as full command/reference channel selection
+- current field work shows that treating `F0-18` as the only solution path is unsafe
+
+### 4. Terminal logic
+
+Primary objects:
+
+- `F1-05`
+- `F1-06`
+
+Meaning:
+
+- DI polarity and two-wire / three-wire terminal semantics
+
+Current confirmed live values:
+
+- `F1-05 = 0`
+- `F1-06 = 0`
+
+These matter for DI behavior, but current evidence does not support them as the missing communication-frequency gate.
 
 ## Current Supported API
 
@@ -348,6 +421,21 @@ Stored in `presets.json`:
 - `0xF106`
 - `0x100B`
 
+Important:
+
+- this built-in preset is historical
+- it is still useful for quick live checks
+- it is not sufficient for the current full local/manual vs auto/Modbus research
+
+For current mode-switch investigation, also inspect:
+
+- `0xF002 -> F0-02`
+- `0xF003 -> F0-03`
+- `0xF102 -> F1-02`
+- `0xF103 -> F1-03`
+- `0xF108 -> F1-08`
+- `0xF109 -> F1-09`
+
 ### `modbus`
 
 - `0xF700`
@@ -430,41 +518,421 @@ The following have already been confirmed on a live machine during bring-up:
 - reversed `DI/RO` wiring causes total communication failure
 - corrected `DI/RO` wiring restores communication
 - `DI3` state is visible through `U0-11`
+- `DI4` state is visible through `U0-11`
 - with current test wiring:
   - `DI3` open -> `U0-11 = 0`
   - `DI3` closed -> `U0-11 = 4`
+  - `DI4` closed -> `U0-11 = 8`
+  - `DI3 + DI4` closed -> `U0-11 = 12`
 - `F0-00` and `F0-01` can be read live and match manual/remote mode changes
+- `F0-02` and `F0-03` can be read live and must be tracked during source-switch tests
 - `F0-18` can be read correctly at `0xF012`
 - `F0-20` can be read correctly at `0xF014`
 - `F1-02` can be read and written at `0xF102`
+- `F1-03` can be read and written at `0xF103`
 - `F1-08` can be read and written at `0xF108`
+- `F1-09` can be read and written at `0xF109`
 - `relay1` can be switched by writing `0x0003`
+- `relay2` can be switched by writing `0x0003`
 - `T1A-T1B` can be used to drive the current `DI3` path from Modbus control
+- `T2A-T2B` can be used to drive the current `DI4` path from Modbus control
 
-## Confirmed Mode Pairing So Far
+## Confirmed Direct Baselines
 
-Currently confirmed live mode pairing:
+### Direct manual baseline
+
+The following baseline has been confirmed as a clean local/manual state:
+
+- `F0-00 = 1`
+- `F0-01 = 1`
+- `F0-02 = 0`
+- `F0-03 = 0`
+- `F0-18 = 0`
+- `F1-02 = 0`
+- `F1-03 = 0`
+- `DI3 open`
+- `DI4 open`
+
+Confirmed live behavior:
+
+- local selector works
+- local panel potentiometer works
+
+### Direct communication baseline
+
+The following baseline has been confirmed as a working direct communication state:
+
+- `F0-00 = 2`
+- `F0-01 = 8`
+- `F0-02 = 0`
+- `F0-03 = 0`
+
+Confirmed live behavior:
+
+- `0x0002` controls run/stop
+- `0x0001` produces a real communication frequency output
+- runtime registers report non-zero delivered frequency in this mode
+
+This direct communication baseline is critical.
+It proves that the `M980` communication-frequency path is real and working when the drive is placed into explicit communication mode.
+
+## Confirmed DI Function Behavior
+
+### `DI3 = 20`
+
+Current confirmed interpretation:
+
+- DI function `20` is command-side switching only
+
+What has been confirmed live:
+
+- `DI3 active` changes effective run/stop ownership
+- this can happen even when `F0-00` does not rewrite itself live
+- `DI3` alone does not make communication frequency work reliably
+
+### `DI4 = 24`
+
+Current confirmed interpretation:
+
+- DI function `24` does affect the frequency-side selection state
+- but current field work has not yet produced a clean full auto-frequency result from `DI4` alone or from `DI3 + DI4`
+
+### Practical rule
+
+For this project, behavior must be validated by:
+
+- actual motor response
+- delivered runtime registers such as `U0-*`
+- not only by static reads of `F0-00`, `F0-01`, `F0-02`, `F0-03`, or `F0-18`
+
+## Research Findings From Official Family Docs
+
+The current research base is:
+
+- official M-Driver `900` family manual
+- official M-Driver configurator / scenario / package docs
+- official Schneider separate command/reference docs used only as architecture analogy
+- live field tests on the current `M980`
+
+### What official M-Driver docs clearly say
+
+- explicit communication mode is:
+  - `F0-00 = 2`
+  - `F0-01 = 8`
+- in that mode:
+  - `0x0002` controls start/stop
+  - `0x0001` controls target frequency
+- DI function `20` switches command source
+- DI function `24` switches frequency source
+- `F0-18` is a binding parameter, not an explicit full profile switch
+
+### What official M-Driver docs do not currently prove
+
+- they do not provide a confirmed one-button recipe showing that `DI20 + DI24 + F0-18`
+  is fully equivalent to:
+  - `F0-00 = 2`
+  - `F0-01 = 8`
+- they do not currently prove that the communication-frequency path becomes fully active
+  just because command source was switched by DI
+- they do not currently prove that `F0-18` can replace full command/reference profile switching for this use case
+
+### What the Schneider analogy changes
+
+Schneider official docs make a much stronger distinction between:
+
+- command channel
+- reference channel
+- explicit local/remote switching between them
+
+That does not prove `M980` is a Schneider clone.
+But it does show that the correct engineering question is:
+
+- is `M980` really capable of the same full dual-channel switching behavior through `DI20/24`
+- or does it require explicit profile changes to enter real communication mode
+
+Current field evidence points more strongly to the second possibility than to the first.
+
+## MDRIVERcfg / Scenario Finding
+
+The local `MDRIVERcfg` archive in this repository is important evidence.
+
+The so-called scenarios are not currently evidenced as free-form runtime logic.
+What can already be seen from the shipped files is:
+
+- `SCEN/WaterPressure.csv` is a parameter batch file made of `address;value` rows
+- `REDY_SYS/st.csv`, `strv.csv`, `strvpt.csv` are canned parameter-set profiles
+
+This is important because it suggests that M-Driver's own tooling already thinks in terms of:
+
+- parameter-set loading
+- prepared profile packages
+
+more than in terms of undocumented hidden DI magic.
+
+This does not prove runtime switching.
+But it strongly supports the idea that profile-level parameter switching is a vendor-native concept.
+
+## Rejected Or Weakened Hypotheses
+
+The following hypotheses are now weak enough that they must not be treated as likely truths.
+
+### `F0-18 = 0820` as the main solution
+
+Rejected.
+
+Reasons:
+
+- it was based on a wrong semantic read of the communication digit
+- later field work showed it should not be treated as canonical truth
+
+### `F0-18 = 0920` as the main solution
+
+Rejected.
+
+Confirmed live effect:
+
+- local selector still works
+- local panel potentiometer stops working
+
+That means `920` breaks a clean manual baseline.
+
+### `F0-18 = 0900` as the main solution
+
+Weakened / not sufficient.
+
+Confirmed live effect:
+
+- it does not break the clean manual baseline
+- but with `DI3 = 20` only, it still does not produce a working communication frequency output
+
+### `DI3 = 20` alone is enough
+
+Rejected.
+
+Confirmed live result:
+
+- `DI3` can switch effective command ownership
+- it does not by itself reproduce working communication frequency behavior
+
+### `DI3 = 20` + `DI4 = 24` is already solved
+
+Rejected.
+
+Current field work shows this path is still incomplete.
+
+## Current Strongest Interpretations
+
+### Interpretation A: explicit communication mode is a hard gate
+
+This is currently the strongest interpretation.
+
+Meaning:
+
+- `0x0001` is truly effective only when the drive is in full explicit communication mode
+- that means:
+  - `F0-00 = 2`
+  - `F0-01 = 8`
+
+This interpretation matches:
+
+- official M-Driver communication-enable docs
+- current direct communication field tests
+- current failure of `DI3`-only and `DI3 + DI4` to reproduce the same result
+
+### Interpretation B: pure DI-only switching may be insufficient
+
+Current probability: medium to high.
+
+Meaning:
+
+- even though `DI20` and `DI24` exist,
+- they may not be enough to recreate full communication mode for this exact use case
+
+### Interpretation C: profile switching may be the real solution family
+
+Current probability: medium.
+
+Meaning:
+
+- working manual and working auto may need to be treated as two explicit full parameter profiles
+- switching might need to happen by:
+  - controller-driven parameter writes,
+  - vendor runtime logic if supported,
+  - or another higher-level mechanism
+
+## Test Ledger
+
+This section is the canonical test memory.
+New tests must be appended here instead of being left only in chat history.
+
+### T001 - Wiring correction
+
+Result:
+
+- reversed `DI/RO` wiring caused total Modbus failure
+- corrected `GPIO17 -> DI`, `GPIO16 <- RO` restored communication
+
+### T002 - Register map correction
+
+Result:
+
+- `F0-18` is `0xF012`, not `0xF018`
+- `F0-20` is `0xF014`, not `0xF020`
+
+### T003 - DI state readback
+
+Result:
+
+- `DI3 active` -> `U0-11 = 4`
+- `DI4 active` -> `U0-11 = 8`
+- both active -> `U0-11 = 12`
+
+### T004 - Relay-driven DI switching
+
+Result:
+
+- `F1-08 = 7` and `F1-09 = 7` make relay1/relay2 controllable from `0x0003`
+- relay1 can drive `DI3`
+- relay2 can drive `DI4`
+
+### T005 - Clean manual baseline
+
+Parameters:
+
+- `F0-00 = 1`
+- `F0-01 = 1`
+- `F0-02 = 0`
+- `F0-03 = 0`
+- `F0-18 = 0`
+- `F1-02 = 0`
+- `F1-03 = 0`
+
+Result:
+
+- local selector works
+- local potentiometer works
+
+### T006 - Direct communication baseline
+
+Parameters:
+
+- `F0-00 = 2`
+- `F0-01 = 8`
+
+Result:
+
+- `0x0002` run/stop works
+- `0x0001` gives real delivered frequency
+
+### T007 - `F0-18 = 920`
+
+Result:
+
+- breaks clean manual baseline
+- selector still works
+- panel potentiometer stops working
+
+### T008 - `F0-18 = 900`
+
+Result:
+
+- does not break clean manual baseline
+- still does not make `DI3 = 20` sufficient for communication frequency
+
+### T009 - `DI3 = 20` only
+
+Result:
+
+- command-side switching confirmed
+- communication frequency not confirmed
+
+### T010 - `DI3 = 20`, `DI4 = 24`, `F0-01 = 1`, `F0-02 = 8`, `F0-03 = 2`
+
+Result:
+
+- this path is still incomplete
+- it has not yet reproduced the same behavior as the direct communication baseline
+
+## Open Questions
+
+The following are still open and must not be treated as settled truth yet:
+
+- whether `DI20/24` can ever reproduce the direct communication baseline without explicit `F0-00 = 2`, `F0-01 = 8`
+- whether there is another required gate parameter near the source-selection group
+- whether vendor internal PLC/runtime logic can switch full profiles from DI state
+- whether a controller-driven full-profile switch is the practical final solution
+- the final host-side CLI for `pump_vfd_debug`
+- OTA update support
+- `mDNS` hostname publication
+
+## Next Test Matrix
+
+Future tests should not be ad hoc.
+They should be grouped by solution family.
+
+### Family A - Binding family
+
+Purpose:
+
+- finish evaluating `F0-18` systematically instead of by random guesses
+
+Rules:
+
+- always test against a known clean manual baseline first
+- vary `F0-18` together with a clearly declared `F0-00..F0-03` profile
+- record whether manual selector, manual pot, Modbus run, and Modbus frequency each work
+
+### Family B - Explicit DI family
+
+Purpose:
+
+- continue `DI20` / `DI24` testing as a command/reference architecture problem
+
+Rules:
+
+- test complete profiles, not isolated single values only
+- always record:
+  - `F0-00`
+  - `F0-01`
+  - `F0-02`
+  - `F0-03`
+  - `F0-18`
+  - `F1-02`
+  - `F1-03`
+  - `F1-05`
+  - `F1-06`
+  - `U0-11`
+  - delivered runtime registers
+
+### Family C - Full-profile switching family
+
+Purpose:
+
+- test whether the real solution is explicit switching between:
+  - manual profile
+  - direct communication profile
+
+Candidate profiles:
 
 - manual:
   - `F0-00 = 1`
   - `F0-01 = 1`
-- remote Modbus:
+- auto:
   - `F0-00 = 2`
   - `F0-01 = 8`
 
-These values are confirmed as readable live truth on the test `M980`.
+### Family D - Vendor runtime logic / PLC family
 
-## What Is Still Not Confirmed
+Purpose:
 
-The following are still open and must not be treated as settled truth yet:
+- test whether internal M-Driver runtime logic can switch or emulate the required profiles
 
-- whether `DI3 function 20` is the final correct mode-switch function for this machine
-- whether `F0-18 = 0820` alone is sufficient for clean DI-based switching
-- whether a power-cycle or additional parameter is required for that switching behavior
-- whether `F0-20 = 1` should be part of the canonical local/remote switching baseline
-- the final host-side CLI for `pump_vfd_debug`
-- OTA update support
-- `mDNS` hostname publication
+Rules:
+
+- do not assume `MDRIVERcfg` package files are runtime logic
+- confirm first whether a given mechanism is:
+  - offline parameter package loading
+  - or actual runtime logic
 
 ## Current Practical Rule
 
@@ -473,5 +941,9 @@ If `pump_vfd_debug` behavior and the existing docs disagree, prefer:
 1. live verified register reads,
 2. this file,
 3. older `M980` mode-switch notes.
+
+Additional rule:
+
+- neighboring docs that still present `F0-18 = 820` as settled truth must be treated as historical until updated against this file
 
 This document should be updated as new behavior is confirmed on real hardware, not by inference alone.
